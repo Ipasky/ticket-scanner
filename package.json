@@ -1,0 +1,24 @@
+{
+  "name": "ticket-scanner",
+  "version": "0.1.0",
+  "description": "Escáner de tiquets con extracción de datos vía Gemini y almacenamiento en SQLite.",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "test": "node --test --test-concurrency=1 tests/*.test.js",
+    "hash-password": "node scripts/hash_password.js",
+    "iconos": "node scripts/generar_iconos.js",
+    "geocodificar": "node scripts/geocodificar.js"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@google/genai": "latest",
+    "better-sqlite3": "latest",
+    "dotenv": "latest",
+    "express": "latest",
+    "multer": "latest"
+  }
+}

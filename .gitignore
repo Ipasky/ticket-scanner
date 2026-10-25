@@ -1,0 +1,56 @@
+# Dependencias
+node_modules/
+
+# Variables de entorno (contienen secretos)
+.env
+.env.*
+!.env.example
+# Claves privadas (Enable Banking y cualquier otra): nunca al repo
+keys/
+*.pem
+# Extractos del banco descargados a mano (Excel/CSV/PDF)
+extractos/
+
+
+# Datos de usuario (fotos de tiquets, información personal)
+uploads/*
+!uploads/.gitkeep
+# Imágenes antiguas cuando se refotografía un tiquet (redundante con uploads/*,
+# explícito por claridad).
+uploads/reemplazadas/
+
+# Base de datos local de SQLite
+database/*
+!database/.gitkeep
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Temporales del sistema operativo
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+
+.claude/
+repomix-output.md
+
+# Documentos internos (notas de diseño y reglas para el asistente): solo en local
+ARCHITECTURE.md
+CLAUDE.md
+tiquets_plan.md
+folder_struct.txt
+repomix.config.json
+referencia_estetica/

@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- PWA: instalable en la pantalla de inicio, con icono y nombre propios.
+         El service worker (sw.js) cachea el armazón y NUNCA /api ni /uploads. -->
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="color-scheme" content="light dark">
+    <meta name="theme-color" content="#fff7ee" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#030a14" media="(prefers-color-scheme: dark)">
+    <link rel="icon" href="/icono.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/iconos/apple-touch-icon-180.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Tiquets">
+    <meta name="mobile-web-app-capable" content="yes">
+    <script src="/pwa.js" defer></script>
+    <title>Entrar · Ticket Scanner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Los mismos tokens que index.html: la puerta de entrada no puede tener
+           otra cara que la aplicación. Ver src/public/index.html para el detalle
+           de cada token. */
+        :root {
+            --fondo: #fff7ee;
+            --blob-1: #ff8b6e; --blob-2: #ffb347; --blob-3: #ffd36b;
+            --blob-4: #ffa08a; --blob-5: #ffe2b5; --blob-6: #ffffff;
+            --blob-opacidad: .82; --grano-opacidad: .26;
+            --vidrio: rgba(255,255,255,.56); --vidrio-linea: rgba(255,255,255,.92);
+            --superficie: #fffbf6; --superficie-2: rgba(255,120,50,.12);
+            --borde: rgba(90,40,10,.09); --borde-fuerte: rgba(90,40,10,.17);
+            --texto: #24170f; --texto-2: #a0735a;
+            --acento: #24170f; --acento-texto: #fffaf3;
+            --aviso: #f07a10; --aviso-fondo: color-mix(in srgb, #f07a10 14%, transparent);
+            --error: #e23d32; --error-fondo: color-mix(in srgb, #e23d32 14%, transparent);
+            --radio: 14px;
+            --sombra: 0 18px 50px rgba(230,110,40,.16);
+            color-scheme: light;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root:not([data-theme="light"]) {
+                --fondo: #030a14;
+                --blob-1: #0f3f86; --blob-2: #164a73; --blob-3: #5fb3c2;
+                --blob-4: #0b2c4d; --blob-5: #1d6d86; --blob-6: #9fe0d0;
+                --blob-opacidad: .85; --grano-opacidad: .30;
+                --vidrio: rgba(8,22,40,.52); --vidrio-linea: rgba(160,220,235,.14);
+                --superficie: #0d1928; --superficie-2: rgba(160,225,240,.14);
+                --borde: rgba(200,230,240,.10); --borde-fuerte: rgba(200,230,240,.22);
+                --texto: #eef4f8; --texto-2: #a9bccb;
+                --acento: #eef4f8; --acento-texto: #06101d;
+                --aviso: #ffb44f; --error: #ff7a6b;
+                --sombra: 0 18px 50px rgba(0,0,0,.55);
+                color-scheme: dark;
+            }
+        }
+        :root[data-theme="dark"] {
+            --fondo: #030a14;
+            --blob-1: #0f3f86; --blob-2: #164a73; --blob-3: #5fb3c2;
+            --blob-4: #0b2c4d; --blob-5: #1d6d86; --blob-6: #9fe0d0;
+            --blob-opacidad: .85; --grano-opacidad: .30;
+            --vidrio: rgba(8,22,40,.52); --vidrio-linea: rgba(160,220,235,.14);
+            --superficie: #0d1928; --superficie-2: rgba(160,225,240,.14);
+            --borde: rgba(200,230,240,.10); --borde-fuerte: rgba(200,230,240,.22);
+            --texto: #eef4f8; --texto-2: #a9bccb;
+            --acento: #eef4f8; --acento-texto: #06101d;
+            --aviso: #ffb44f; --error: #ff7a6b;
+            --sombra: 0 18px 50px rgba(0,0,0,.55);
+            color-scheme: dark;
+        }
+
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; min-height: 100%;
+            background-color: var(--fondo); color: var(--texto);
+            font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                  "Helvetica Neue", Arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* El fondo de manchas, igual que en la aplicación. */
+        .fondo { position: fixed; inset: 0; z-index: 0; overflow: hidden; background: var(--fondo); pointer-events: none; }
+        .fondo i {
+            position: absolute; display: block; border-radius: 50%;
+            opacity: var(--blob-opacidad); filter: blur(90px);
+            animation: deriva 38s ease-in-out infinite alternate;
+        }
+        .fondo .b1 { width: 70vmax; height: 55vmax; left: -25vmax; top: -18vmax; background: var(--blob-1); }
+        .fondo .b2 { width: 65vmax; height: 50vmax; left: -20vmax; bottom: -22vmax; background: var(--blob-2); animation-duration: 46s; }
+        .fondo .b3 { width: 60vmax; height: 70vmax; right: -28vmax; top: -10vmax; background: var(--blob-3); animation-duration: 52s; animation-delay: -12s; }
+        .fondo .b4 { width: 55vmax; height: 40vmax; left: 25%; bottom: -20vmax; background: var(--blob-4); animation-duration: 41s; animation-delay: -20s; }
+        @keyframes deriva {
+            0%   { transform: translate(0, 0) rotate(0deg) scale(1); }
+            50%  { transform: translate(4vmax, -3vmax) rotate(8deg) scale(1.06); }
+            100% { transform: translate(-3vmax, 4vmax) rotate(-6deg) scale(.96); }
+        }
+        .fondo::after {
+            content: ""; position: absolute; inset: -50%;
+            opacity: var(--grano-opacidad); mix-blend-mode: overlay;
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/><feComponentTransfer><feFuncR type='linear' slope='2.2' intercept='-.6'/><feFuncG type='linear' slope='2.2' intercept='-.6'/><feFuncB type='linear' slope='2.2' intercept='-.6'/><feFuncA type='linear' slope='0' intercept='1'/></feComponentTransfer></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+        }
+        @media (prefers-reduced-motion: reduce) { .fondo i { animation: none; } }
+        .capa { position: relative; z-index: 1; }
+
+        .tarjeta {
+            background: var(--vidrio); border: 1px solid var(--vidrio-linea);
+            border-radius: var(--radio); box-shadow: var(--sombra);
+            -webkit-backdrop-filter: blur(22px) saturate(140%);
+            backdrop-filter: blur(22px) saturate(140%);
+        }
+        .titulo-grande {
+            font-size: clamp(26px, 4vw, 36px); font-weight: 800;
+            letter-spacing: -.035em; line-height: 1.05; margin: 0;
+        }
+        .campo {
+            width: 100%; font: inherit; font-size: 1rem; color: var(--texto);
+            background: var(--vidrio); border: 1px solid var(--borde-fuerte);
+            border-radius: 9px; padding: .6rem .75rem;
+            -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+        }
+        .campo:focus { outline: none; border-color: var(--acento); }
+        .boton {
+            display: inline-flex; align-items: center; justify-content: center;
+            font: inherit; border: 1px solid var(--acento); background: var(--acento);
+            color: var(--acento-texto); border-radius: 10px;
+            padding: .7rem 1.1rem; font-weight: 600; cursor: pointer;
+            transition: filter .18s ease, transform .1s ease;
+        }
+        .boton:hover { filter: brightness(1.08); }
+        .boton:active { transform: translateY(1px); }
+        .boton:disabled { opacity: .5; }
+        :focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; }
+    </style>
+</head>
+<body class="p-3 sm:p-5">
+
+<div class="fondo" aria-hidden="true">
+    <i class="b1"></i><i class="b2"></i><i class="b3"></i><i class="b4"></i>
+</div>
+
+
+    <div class="capa max-w-sm mx-auto mt-10 sm:mt-20 tarjeta p-6">
+        <h1 class="titulo-grande mb-1 text-center">Tiquets</h1>
+        <p class="text-sm text-center mb-6" style="color: var(--texto-2)">Entra para ver tus tiquets.</p>
+
+        <form id="formLogin" class="space-y-4">
+            <label class="block">
+                <span class="text-xs" style="color: var(--texto-2)">Contraseña</span>
+                <!-- Un solo usuario: no hay campo de usuario que rellenar. -->
+                <input id="fPassword" type="password" autocomplete="current-password"
+                       required autofocus
+                       class="campo mt-1">
+            </label>
+
+            <button id="btnEntrar" type="submit"
+                    class="boton w-full">
+                Entrar
+            </button>
+        </form>
+
+        <div id="aviso" class="hidden mt-4 p-3 rounded text-sm"></div>
+
+        <p class="text-xs mt-6 text-center" style="color: var(--texto-3)">
+            Sesión de 30 días, renovada al usarla.<br>
+            <!-- En producción esta página no se ve: allí AUTH_MODE=proxy y de la
+                 identidad se encarga el portal. -->
+            Modo de desarrollo: en producción entra por el portal.
+        </p>
+    </div>
+
+    <script>
+        const form   = document.getElementById('formLogin');
+        const campo  = document.getElementById('fPassword');
+        const boton  = document.getElementById('btnEntrar');
+        const aviso  = document.getElementById('aviso');
+
+        function mostrarAviso(clases, html) {
+            aviso.className = 'mt-4 p-3 rounded text-sm';
+            aviso.style.color = 'var(--error)';
+            aviso.style.background = 'var(--error-fondo)';
+            aviso.innerHTML = html;
+            aviso.classList.remove('hidden');
+        }
+        const avisoError = (html) =>
+            mostrarAviso('aviso-error', html);
+
+        const esc = (v) => String(v ?? '')
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+        // Si este despliegue no gestiona contraseñas (AUTH_MODE=proxy), esta página
+        // no tiene sentido: la identidad la pone el proxy.
+        (async () => {
+            try {
+                const res = await fetch('/api/auth/estado');
+                const estado = await res.json();
+                if (estado.autenticado) return location.replace('/');
+                if (!estado.login_disponible) return location.replace('/sin-identidad.html');
+            } catch (_) { /* sin red: que al menos se vea el formulario */ }
+        })();
+
+        form.addEventListener('submit', async (ev) => {
+            ev.preventDefault();
+            boton.disabled = true;
+            boton.classList.add('opacity-50');
+            aviso.classList.add('hidden');
+
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: campo.value })
+                });
+                const datos = await res.json().catch(() => ({}));
+
+                if (res.ok) {
+                    // replace y no href: así el botón "atrás" no vuelve al login.
+                    return location.replace('/');
+                }
+
+                avisoError(esc(datos.error || `Error ${res.status}.`));
+                campo.value = '';
+                campo.focus();
+            } catch (err) {
+                console.error(err);
+                avisoError('Error de conexión con el servidor.');
+            } finally {
+                boton.disabled = false;
+                boton.classList.remove('opacity-50');
+            }
+        });
+    </script>
+</body>
+</html>

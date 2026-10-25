@@ -1,0 +1,3025 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- PWA: instalable en la pantalla de inicio, con icono y nombre propios.
+         El service worker (sw.js) cachea el armazón y NUNCA /api ni /uploads. -->
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="color-scheme" content="light dark">
+    <meta name="theme-color" content="#fff7ee" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#030a14" media="(prefers-color-scheme: dark)">
+    <link rel="icon" href="/icono.svg" type="image/svg+xml">
+
+    <!-- El tema elegido se aplica ANTES de pintar nada: si se leyera desde
+         app.js, la página parpadearía en claro antes de ponerse oscura. -->
+    <script>
+        try {
+            const p = localStorage.getItem('paleta');
+            if (p) document.documentElement.dataset.paleta = p;
+            const t = localStorage.getItem('tema');
+            if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+        } catch (e) {}
+    </script>
+    <link rel="apple-touch-icon" href="/iconos/apple-touch-icon-180.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Tiquets">
+    <meta name="mobile-web-app-capable" content="yes">
+    <script src="/pwa.js" defer></script>
+
+    <title>Tiquets</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Agrupa los puntos del mapa al alejarse (librería oficial de Google). -->
+    <script src="https://unpkg.com/@googlemaps/markerclusterer@2.5.3/dist/index.min.js" defer></script>
+    <!-- El mapa es Google Maps: la API se carga desde app.js con la clave que da
+         /api/mapa/config, solo cuando hay algo que pintar. -->
+    <!-- pdf.js: las facturas llegan en PDF y se guardan tal cual. Para verlas
+         dentro del editor hay que pintarlas, y el navegador no deja incrustar un
+         PDF en un canvas por su cuenta. Versión UMD (3.x), que expone pdfjsLib
+         como global y no obliga a convertir app.js en un módulo. -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
+
+    <style>
+        /* ═══════════════════════════════════════════════════════════════════
+           TOKENS
+           Dos paletas: cálida y luminosa en claro (coral, naranja, amarillo
+           sobre crema) y azul profundo en oscuro. Todo el color sale de aquí.
+
+           Hay UN acento de interfaz (--acento), que es tinta de alto contraste
+           —casi negro en claro, casi blanco en oscuro— y se usa para botones
+           principales, selección y foco. El COLOR DEL GASTO es otra cosa: tres
+           tramos (--g verde, --o naranja, --r rojo) que dicen si un día es
+           tranquilo, normal o caro PARA MÍ. Esa escala no son umbrales fijos:
+           son percentiles de mi propio histórico (/api/estadisticas/escala).
+           ═══════════════════════════════════════════════════════════════════ */
+        :root {
+            --fondo:        #fff7ee;
+            --blob-1:       #ff8b6e;
+            --blob-2:       #ffb347;
+            --blob-3:       #ffd36b;
+            --blob-4:       #ffa08a;
+            --blob-5:       #ffe2b5;
+            --blob-6:       #ffffff;
+            --blob-opacidad: .82;
+            --grano-opacidad: .26;
+            --grano-mezcla:  overlay;
+
+            --vidrio:       rgba(255, 255, 255, .56);
+            --vidrio-linea: rgba(255, 255, 255, .92);
+            --superficie:   #fffbf6;
+            --superficie-2: rgba(255, 120, 50, .12);
+            --borde:        rgba(90, 40, 10, .09);
+            --borde-fuerte: rgba(90, 40, 10, .17);
+
+            --texto:        #24170f;
+            --texto-2:      #a0735a;
+            --texto-3:      color-mix(in srgb, var(--texto) 52%, transparent);
+
+            --acento:       #24170f;
+            --acento-texto: #fffaf3;
+            --acento-suave: rgba(255, 120, 50, .16);
+
+            /* El fin de semana, con los tokens de la referencia: melocotón vivo
+               en claro y cian vivo en oscuro. Es el ÚNICO tinte que llevan las
+               casillas, en mes, semana y año. */
+            --finde:        rgba(255, 140, 70, .17);
+            --finde-texto:  #e2621c;
+
+            /* La superficie de una casilla, la misma en las cuatro vistas. */
+            --casilla:        rgba(255, 255, 255, .42);
+            --casilla-borde:  rgba(90, 40, 10, .10);
+
+            /* El punto del mapa: tiene que verse sobre el mapa, que es claro en
+               un tema y oscuro en el otro. Coral vivo de la paleta, el mismo en
+               los dos; lo que cambia es el borde. */
+            --punto:        #ff5a36;
+            --punto-borde:  #ffffff;
+
+            /* Escala del gasto y estados. */
+            --g:            #22a05c;
+            --o:            #f07a10;
+            --r:            #e23d32;
+            --correcto:     var(--g);
+            --aviso:        var(--o);
+            --error:        var(--r);
+            --peligro:      #d0402a;
+            --aviso-fondo:  color-mix(in srgb, var(--o) 14%, transparent);
+            --error-fondo:  color-mix(in srgb, var(--r) 14%, transparent);
+
+            --radio:        14px;
+            --sombra:       0 18px 50px rgba(230, 110, 40, .16);
+
+            /* Una sola altura para TODOS los controles (botones, campos,
+               desplegables). Antes cada sitio ponia su padding y los botones de
+               una misma fila no se alineaban entre ellos. */
+            --alto-control: 38px;
+            --radio-control: 9px;
+
+            /* El hueco entre bloques, uno para toda la página: la rejilla del
+               panel, la de las cifras y las dos columnas del análisis usan el
+               mismo, y por eso las cajas quedan alineadas entre sí. */
+            --hueco: 1rem;
+            color-scheme: light;
+        }
+
+        /* Azul profundo. Se declara dos veces a propósito: una para quien no ha
+           elegido tema (sigue al sistema) y otra para quien ha elegido oscuro. */
+        @media (prefers-color-scheme: dark) {
+            :root:not([data-theme="light"]) {
+                --fondo: #030a14;
+                --blob-1: #0f3f86; --blob-2: #164a73; --blob-3: #5fb3c2;
+                --blob-4: #0b2c4d; --blob-5: #1d6d86; --blob-6: #9fe0d0;
+                --blob-opacidad: .85; --grano-opacidad: .30;
+                --vidrio: rgba(8, 22, 40, .52); --vidrio-linea: rgba(160, 220, 235, .14);
+                --superficie: #0d1928;
+                --superficie-2: rgba(160, 225, 240, .14);
+                --borde: rgba(200, 230, 240, .10); --borde-fuerte: rgba(200, 230, 240, .22);
+                --texto: #eef4f8; --texto-2: #a9bccb;
+                --acento: #eef4f8; --acento-texto: #06101d;
+                --acento-suave: rgba(160, 225, 240, .16);
+                --finde: rgba(95, 200, 215, .20); --finde-texto: #a6eaf2;
+                --casilla: rgba(160, 220, 235, .07); --casilla-borde: rgba(200, 230, 240, .12);
+                --punto: #ff6a45; --punto-borde: #06101d;
+                --g: #5fd38f; --o: #ffb44f; --r: #ff7a6b; --peligro: #ef8a7c;
+                --sombra: 0 18px 50px rgba(0, 0, 0, .55);
+                color-scheme: dark;
+            }
+        }
+        :root[data-theme="dark"] {
+            --fondo: #030a14;
+            --blob-1: #0f3f86; --blob-2: #164a73; --blob-3: #5fb3c2;
+            --blob-4: #0b2c4d; --blob-5: #1d6d86; --blob-6: #9fe0d0;
+            --blob-opacidad: .85; --grano-opacidad: .30;
+            --vidrio: rgba(8, 22, 40, .52); --vidrio-linea: rgba(160, 220, 235, .14);
+            --superficie: #0d1928;
+            --superficie-2: rgba(160, 225, 240, .14);
+            --borde: rgba(200, 230, 240, .10); --borde-fuerte: rgba(200, 230, 240, .22);
+            --texto: #eef4f8; --texto-2: #a9bccb;
+            --acento: #eef4f8; --acento-texto: #06101d;
+            --acento-suave: rgba(160, 225, 240, .16);
+            --finde: rgba(95, 200, 215, .20); --finde-texto: #a6eaf2;
+            --casilla: rgba(160, 220, 235, .07); --casilla-borde: rgba(200, 230, 240, .12);
+            --punto: #ff6a45; --punto-borde: #06101d;
+            --g: #5fd38f; --o: #ffb44f; --r: #ff7a6b; --peligro: #ef8a7c;
+            --sombra: 0 18px 50px rgba(0, 0, 0, .55);
+            color-scheme: dark;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           PALETAS
+           La original (cálida en claro, azul en oscuro) es la de :root y no
+           lleva atributo. Las demás cambian el tono del fondo, del vidrio, del
+           fin de semana y de los bordes; la escala del gasto (verde, naranja,
+           rojo) no cambia, porque tiene significado. Cada paleta tiene su
+           versión clara y oscura, y las dos reglas son excluyentes.
+           ═══════════════════════════════════════════════════════════════════ */
+
+        :root[data-paleta="verde"][data-theme="light"] {
+                --fondo: hsl(150 60% 95%);
+                --blob-1: hsl(160 65% 58%); --blob-2: hsl(120 60% 64%); --blob-3: hsl(75 85% 68%);
+                --blob-4: hsl(178 60% 68%); --blob-5: hsl(95 70% 85%); --blob-6: #ffffff;
+                --superficie: hsl(145 60% 98%); --superficie-2: hsl(145 80% 50% / .12);
+                --borde: hsl(145 60% 20% / .09); --borde-fuerte: hsl(145 60% 20% / .17);
+                --texto: hsl(145 40% 12%); --texto-2: hsl(145 30% 38%);
+                --acento: hsl(145 40% 12%); --acento-texto: hsl(145 60% 98%);
+                --acento-suave: hsl(145 80% 50% / .16);
+                --finde: hsl(145 85% 55% / .18); --finde-texto: hsl(145 75% 38%);
+                --casilla-borde: hsl(145 60% 20% / .10);
+                --sombra: 0 18px 50px hsl(145 70% 40% / .16);
+        }
+        @media (prefers-color-scheme: light) {
+            :root[data-paleta="verde"]:not([data-theme="dark"]) {
+                --fondo: hsl(150 60% 95%);
+                --blob-1: hsl(160 65% 58%); --blob-2: hsl(120 60% 64%); --blob-3: hsl(75 85% 68%);
+                --blob-4: hsl(178 60% 68%); --blob-5: hsl(95 70% 85%); --blob-6: #ffffff;
+                --superficie: hsl(145 60% 98%); --superficie-2: hsl(145 80% 50% / .12);
+                --borde: hsl(145 60% 20% / .09); --borde-fuerte: hsl(145 60% 20% / .17);
+                --texto: hsl(145 40% 12%); --texto-2: hsl(145 30% 38%);
+                --acento: hsl(145 40% 12%); --acento-texto: hsl(145 60% 98%);
+                --acento-suave: hsl(145 80% 50% / .16);
+                --finde: hsl(145 85% 55% / .18); --finde-texto: hsl(145 75% 38%);
+                --casilla-borde: hsl(145 60% 20% / .10);
+                --sombra: 0 18px 50px hsl(145 70% 40% / .16);
+            }
+        }
+        :root[data-paleta="verde"][data-theme="dark"] {
+                --fondo: hsl(165 70% 3%);
+                --blob-1: hsl(155 72% 20%); --blob-2: hsl(172 55% 23%); --blob-3: hsl(95 55% 50%);
+                --blob-4: hsl(162 75% 9%); --blob-5: hsl(185 58% 28%); --blob-6: hsl(130 55% 76%);
+                --vidrio: hsl(145 50% 9% / .52); --vidrio-linea: hsl(145 60% 80% / .14);
+                --superficie: hsl(145 40% 10%); --superficie-2: hsl(145 60% 75% / .14);
+                --borde: hsl(145 40% 85% / .10); --borde-fuerte: hsl(145 40% 85% / .22);
+                --texto: hsl(145 30% 95%); --texto-2: hsl(145 20% 72%);
+                --acento: hsl(145 30% 95%); --acento-texto: hsl(145 60% 6%);
+                --acento-suave: hsl(145 60% 75% / .16);
+                --finde: hsl(145 65% 60% / .22); --finde-texto: hsl(145 80% 80%);
+                --casilla: hsl(145 50% 80% / .07); --casilla-borde: hsl(145 40% 85% / .12);
+        }
+        @media (prefers-color-scheme: dark) {
+            :root[data-paleta="verde"]:not([data-theme="light"]) {
+                --fondo: hsl(165 70% 3%);
+                --blob-1: hsl(155 72% 20%); --blob-2: hsl(172 55% 23%); --blob-3: hsl(95 55% 50%);
+                --blob-4: hsl(162 75% 9%); --blob-5: hsl(185 58% 28%); --blob-6: hsl(130 55% 76%);
+                --vidrio: hsl(145 50% 9% / .52); --vidrio-linea: hsl(145 60% 80% / .14);
+                --superficie: hsl(145 40% 10%); --superficie-2: hsl(145 60% 75% / .14);
+                --borde: hsl(145 40% 85% / .10); --borde-fuerte: hsl(145 40% 85% / .22);
+                --texto: hsl(145 30% 95%); --texto-2: hsl(145 20% 72%);
+                --acento: hsl(145 30% 95%); --acento-texto: hsl(145 60% 6%);
+                --acento-suave: hsl(145 60% 75% / .16);
+                --finde: hsl(145 65% 60% / .22); --finde-texto: hsl(145 80% 80%);
+                --casilla: hsl(145 50% 80% / .07); --casilla-borde: hsl(145 40% 85% / .12);
+            }
+        }
+
+        :root[data-paleta="magenta"][data-theme="light"] {
+                --fondo: hsl(320 70% 97%);
+                --blob-1: hsl(322 82% 68%); --blob-2: hsl(278 72% 72%); --blob-3: hsl(348 92% 76%);
+                --blob-4: hsl(300 62% 76%); --blob-5: hsl(20 92% 86%); --blob-6: #ffffff;
+                --superficie: hsl(315 60% 98%); --superficie-2: hsl(315 80% 50% / .12);
+                --borde: hsl(315 60% 20% / .09); --borde-fuerte: hsl(315 60% 20% / .17);
+                --texto: hsl(315 40% 12%); --texto-2: hsl(315 30% 38%);
+                --acento: hsl(315 40% 12%); --acento-texto: hsl(315 60% 98%);
+                --acento-suave: hsl(315 80% 50% / .16);
+                --finde: hsl(315 85% 55% / .18); --finde-texto: hsl(315 75% 38%);
+                --casilla-borde: hsl(315 60% 20% / .10);
+                --sombra: 0 18px 50px hsl(315 70% 40% / .16);
+        }
+        @media (prefers-color-scheme: light) {
+            :root[data-paleta="magenta"]:not([data-theme="dark"]) {
+                --fondo: hsl(320 70% 97%);
+                --blob-1: hsl(322 82% 68%); --blob-2: hsl(278 72% 72%); --blob-3: hsl(348 92% 76%);
+                --blob-4: hsl(300 62% 76%); --blob-5: hsl(20 92% 86%); --blob-6: #ffffff;
+                --superficie: hsl(315 60% 98%); --superficie-2: hsl(315 80% 50% / .12);
+                --borde: hsl(315 60% 20% / .09); --borde-fuerte: hsl(315 60% 20% / .17);
+                --texto: hsl(315 40% 12%); --texto-2: hsl(315 30% 38%);
+                --acento: hsl(315 40% 12%); --acento-texto: hsl(315 60% 98%);
+                --acento-suave: hsl(315 80% 50% / .16);
+                --finde: hsl(315 85% 55% / .18); --finde-texto: hsl(315 75% 38%);
+                --casilla-borde: hsl(315 60% 20% / .10);
+                --sombra: 0 18px 50px hsl(315 70% 40% / .16);
+            }
+        }
+        :root[data-paleta="magenta"][data-theme="dark"] {
+                --fondo: hsl(280 60% 4%);
+                --blob-1: hsl(300 66% 24%); --blob-2: hsl(268 55% 26%); --blob-3: hsl(330 62% 56%);
+                --blob-4: hsl(285 70% 10%); --blob-5: hsl(250 50% 32%); --blob-6: hsl(320 62% 80%);
+                --vidrio: hsl(315 50% 9% / .52); --vidrio-linea: hsl(315 60% 80% / .14);
+                --superficie: hsl(315 40% 10%); --superficie-2: hsl(315 60% 75% / .14);
+                --borde: hsl(315 40% 85% / .10); --borde-fuerte: hsl(315 40% 85% / .22);
+                --texto: hsl(315 30% 95%); --texto-2: hsl(315 20% 72%);
+                --acento: hsl(315 30% 95%); --acento-texto: hsl(315 60% 6%);
+                --acento-suave: hsl(315 60% 75% / .16);
+                --finde: hsl(315 65% 60% / .22); --finde-texto: hsl(315 80% 80%);
+                --casilla: hsl(315 50% 80% / .07); --casilla-borde: hsl(315 40% 85% / .12);
+        }
+        @media (prefers-color-scheme: dark) {
+            :root[data-paleta="magenta"]:not([data-theme="light"]) {
+                --fondo: hsl(280 60% 4%);
+                --blob-1: hsl(300 66% 24%); --blob-2: hsl(268 55% 26%); --blob-3: hsl(330 62% 56%);
+                --blob-4: hsl(285 70% 10%); --blob-5: hsl(250 50% 32%); --blob-6: hsl(320 62% 80%);
+                --vidrio: hsl(315 50% 9% / .52); --vidrio-linea: hsl(315 60% 80% / .14);
+                --superficie: hsl(315 40% 10%); --superficie-2: hsl(315 60% 75% / .14);
+                --borde: hsl(315 40% 85% / .10); --borde-fuerte: hsl(315 40% 85% / .22);
+                --texto: hsl(315 30% 95%); --texto-2: hsl(315 20% 72%);
+                --acento: hsl(315 30% 95%); --acento-texto: hsl(315 60% 6%);
+                --acento-suave: hsl(315 60% 75% / .16);
+                --finde: hsl(315 65% 60% / .22); --finde-texto: hsl(315 80% 80%);
+                --casilla: hsl(315 50% 80% / .07); --casilla-borde: hsl(315 40% 85% / .12);
+            }
+        }
+
+        :root[data-paleta="amarillo"][data-theme="light"] {
+                --fondo: hsl(45 90% 95%);
+                --blob-1: hsl(45 95% 60%); --blob-2: hsl(28 95% 64%); --blob-3: hsl(60 92% 68%);
+                --blob-4: hsl(85 60% 72%); --blob-5: hsl(38 92% 85%); --blob-6: #ffffff;
+                --superficie: hsl(45 60% 98%); --superficie-2: hsl(45 80% 50% / .12);
+                --borde: hsl(45 60% 20% / .09); --borde-fuerte: hsl(45 60% 20% / .17);
+                --texto: hsl(45 40% 12%); --texto-2: hsl(45 30% 32%);
+                --acento: hsl(45 40% 12%); --acento-texto: hsl(45 60% 98%);
+                --acento-suave: hsl(45 80% 50% / .16);
+                --finde: hsl(45 85% 55% / .18); --finde-texto: hsl(45 75% 30%);
+                --casilla-borde: hsl(45 60% 20% / .10);
+                --sombra: 0 18px 50px hsl(45 70% 40% / .16);
+        }
+        @media (prefers-color-scheme: light) {
+            :root[data-paleta="amarillo"]:not([data-theme="dark"]) {
+                --fondo: hsl(45 90% 95%);
+                --blob-1: hsl(45 95% 60%); --blob-2: hsl(28 95% 64%); --blob-3: hsl(60 92% 68%);
+                --blob-4: hsl(85 60% 72%); --blob-5: hsl(38 92% 85%); --blob-6: #ffffff;
+                --superficie: hsl(45 60% 98%); --superficie-2: hsl(45 80% 50% / .12);
+                --borde: hsl(45 60% 20% / .09); --borde-fuerte: hsl(45 60% 20% / .17);
+                --texto: hsl(45 40% 12%); --texto-2: hsl(45 30% 32%);
+                --acento: hsl(45 40% 12%); --acento-texto: hsl(45 60% 98%);
+                --acento-suave: hsl(45 80% 50% / .16);
+                --finde: hsl(45 85% 55% / .18); --finde-texto: hsl(45 75% 30%);
+                --casilla-borde: hsl(45 60% 20% / .10);
+                --sombra: 0 18px 50px hsl(45 70% 40% / .16);
+            }
+        }
+        :root[data-paleta="amarillo"][data-theme="dark"] {
+                --fondo: hsl(32 60% 4%);
+                --blob-1: hsl(38 78% 24%); --blob-2: hsl(22 62% 22%); --blob-3: hsl(50 75% 52%);
+                --blob-4: hsl(30 65% 9%); --blob-5: hsl(60 45% 28%); --blob-6: hsl(45 88% 78%);
+                --vidrio: hsl(45 50% 9% / .52); --vidrio-linea: hsl(45 60% 80% / .14);
+                --superficie: hsl(45 40% 10%); --superficie-2: hsl(45 60% 75% / .14);
+                --borde: hsl(45 40% 85% / .10); --borde-fuerte: hsl(45 40% 85% / .22);
+                --texto: hsl(45 30% 95%); --texto-2: hsl(45 20% 72%);
+                --acento: hsl(45 30% 95%); --acento-texto: hsl(45 60% 6%);
+                --acento-suave: hsl(45 60% 75% / .16);
+                --finde: hsl(45 65% 60% / .22); --finde-texto: hsl(45 80% 80%);
+                --casilla: hsl(45 50% 80% / .07); --casilla-borde: hsl(45 40% 85% / .12);
+        }
+        @media (prefers-color-scheme: dark) {
+            :root[data-paleta="amarillo"]:not([data-theme="light"]) {
+                --fondo: hsl(32 60% 4%);
+                --blob-1: hsl(38 78% 24%); --blob-2: hsl(22 62% 22%); --blob-3: hsl(50 75% 52%);
+                --blob-4: hsl(30 65% 9%); --blob-5: hsl(60 45% 28%); --blob-6: hsl(45 88% 78%);
+                --vidrio: hsl(45 50% 9% / .52); --vidrio-linea: hsl(45 60% 80% / .14);
+                --superficie: hsl(45 40% 10%); --superficie-2: hsl(45 60% 75% / .14);
+                --borde: hsl(45 40% 85% / .10); --borde-fuerte: hsl(45 40% 85% / .22);
+                --texto: hsl(45 30% 95%); --texto-2: hsl(45 20% 72%);
+                --acento: hsl(45 30% 95%); --acento-texto: hsl(45 60% 6%);
+                --acento-suave: hsl(45 60% 75% / .16);
+                --finde: hsl(45 65% 60% / .22); --finde-texto: hsl(45 80% 80%);
+                --casilla: hsl(45 50% 80% / .07); --casilla-borde: hsl(45 40% 85% / .12);
+            }
+        }
+
+        :root[data-paleta="rojo"][data-theme="light"] {
+                --fondo: hsl(355 80% 97%);
+                --blob-1: hsl(355 85% 66%); --blob-2: hsl(16 92% 66%); --blob-3: hsl(335 75% 74%);
+                --blob-4: hsl(5 80% 76%); --blob-5: hsl(28 92% 85%); --blob-6: #ffffff;
+                --superficie: hsl(355 60% 98%); --superficie-2: hsl(355 80% 50% / .12);
+                --borde: hsl(355 60% 20% / .09); --borde-fuerte: hsl(355 60% 20% / .17);
+                --texto: hsl(355 40% 12%); --texto-2: hsl(355 30% 38%);
+                --acento: hsl(355 40% 12%); --acento-texto: hsl(355 60% 98%);
+                --acento-suave: hsl(355 80% 50% / .16);
+                --finde: hsl(355 85% 55% / .18); --finde-texto: hsl(355 75% 38%);
+                --casilla-borde: hsl(355 60% 20% / .10);
+                --sombra: 0 18px 50px hsl(355 70% 40% / .16);
+        }
+        @media (prefers-color-scheme: light) {
+            :root[data-paleta="rojo"]:not([data-theme="dark"]) {
+                --fondo: hsl(355 80% 97%);
+                --blob-1: hsl(355 85% 66%); --blob-2: hsl(16 92% 66%); --blob-3: hsl(335 75% 74%);
+                --blob-4: hsl(5 80% 76%); --blob-5: hsl(28 92% 85%); --blob-6: #ffffff;
+                --superficie: hsl(355 60% 98%); --superficie-2: hsl(355 80% 50% / .12);
+                --borde: hsl(355 60% 20% / .09); --borde-fuerte: hsl(355 60% 20% / .17);
+                --texto: hsl(355 40% 12%); --texto-2: hsl(355 30% 38%);
+                --acento: hsl(355 40% 12%); --acento-texto: hsl(355 60% 98%);
+                --acento-suave: hsl(355 80% 50% / .16);
+                --finde: hsl(355 85% 55% / .18); --finde-texto: hsl(355 75% 38%);
+                --casilla-borde: hsl(355 60% 20% / .10);
+                --sombra: 0 18px 50px hsl(355 70% 40% / .16);
+            }
+        }
+        :root[data-paleta="rojo"][data-theme="dark"] {
+                --fondo: hsl(350 60% 4%);
+                --blob-1: hsl(355 68% 24%); --blob-2: hsl(338 50% 22%); --blob-3: hsl(10 68% 54%);
+                --blob-4: hsl(350 65% 9%); --blob-5: hsl(318 42% 28%); --blob-6: hsl(18 78% 78%);
+                --vidrio: hsl(355 50% 9% / .52); --vidrio-linea: hsl(355 60% 80% / .14);
+                --superficie: hsl(355 40% 10%); --superficie-2: hsl(355 60% 75% / .14);
+                --borde: hsl(355 40% 85% / .10); --borde-fuerte: hsl(355 40% 85% / .22);
+                --texto: hsl(355 30% 95%); --texto-2: hsl(355 20% 72%);
+                --acento: hsl(355 30% 95%); --acento-texto: hsl(355 60% 6%);
+                --acento-suave: hsl(355 60% 75% / .16);
+                --finde: hsl(355 65% 60% / .22); --finde-texto: hsl(355 80% 80%);
+                --casilla: hsl(355 50% 80% / .07); --casilla-borde: hsl(355 40% 85% / .12);
+        }
+        @media (prefers-color-scheme: dark) {
+            :root[data-paleta="rojo"]:not([data-theme="light"]) {
+                --fondo: hsl(350 60% 4%);
+                --blob-1: hsl(355 68% 24%); --blob-2: hsl(338 50% 22%); --blob-3: hsl(10 68% 54%);
+                --blob-4: hsl(350 65% 9%); --blob-5: hsl(318 42% 28%); --blob-6: hsl(18 78% 78%);
+                --vidrio: hsl(355 50% 9% / .52); --vidrio-linea: hsl(355 60% 80% / .14);
+                --superficie: hsl(355 40% 10%); --superficie-2: hsl(355 60% 75% / .14);
+                --borde: hsl(355 40% 85% / .10); --borde-fuerte: hsl(355 40% 85% / .22);
+                --texto: hsl(355 30% 95%); --texto-2: hsl(355 20% 72%);
+                --acento: hsl(355 30% 95%); --acento-texto: hsl(355 60% 6%);
+                --acento-suave: hsl(355 60% 75% / .16);
+                --finde: hsl(355 65% 60% / .22); --finde-texto: hsl(355 80% 80%);
+                --casilla: hsl(355 50% 80% / .07); --casilla-borde: hsl(355 40% 85% / .12);
+            }
+        }
+
+        /* Barras de scroll mínimas: una línea translúcida que solo dice "hay
+           más". Chrome y Edge usan ::-webkit-scrollbar; Firefox, las
+           propiedades estándar (que en Chrome anularían a las de arriba, por
+           eso van solo para él). */
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+        ::-webkit-scrollbar-thumb {
+            background: color-mix(in srgb, var(--texto) 18%, transparent);
+            border-radius: 999px;
+        }
+        ::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--texto) 34%, transparent); }
+        ::-webkit-scrollbar-button { display: none; height: 0; width: 0; }
+        @supports not selector(::-webkit-scrollbar) {
+            * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--texto) 22%, transparent) transparent; }
+        }
+
+        /* Zoom de la foto dentro del editor */
+        #editorFotoCaja { touch-action: none; user-select: none; -webkit-user-select: none; }
+        /* SIN will-change: con él, el navegador guarda la capa como una imagen al
+           tamaño pequeño y la estira al ampliar, y se ve pixelada. Sin él, la
+           vuelve a dibujar a la resolución real de la foto. */
+        .editor-zoom { position: relative; transform-origin: 0 0; cursor: zoom-in; }
+        .lupa-caja { position: absolute; inset: 3rem .5rem .5rem; overflow: hidden; touch-action: none; user-select: none; }
+        .lupa-zoom { width: 100%; height: 100%; }
+        .icono-cat { width: 17px; height: 17px; flex: 0 0 auto; color: var(--texto-2); }
+        .icono-cat-sm { width: 13px; height: 13px; display: inline-block; vertical-align: -2px; margin-right: .3rem; }
+        .editor-zoom.ampliada { cursor: grab; }
+        .editor-zoom.arrastrando { cursor: grabbing; }
+        .controles-zoom {
+            position: absolute; right: .5rem; bottom: .5rem; z-index: 3;
+            display: flex; align-items: center; gap: 2px; padding: 3px;
+            border-radius: 10px; background: rgba(12, 12, 14, .72);
+            -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+        }
+        .controles-zoom button {
+            width: 28px; height: 28px; border: 0; border-radius: 7px;
+            background: transparent; color: #fff; font-size: 1rem; cursor: pointer;
+        }
+        .controles-zoom button:hover { background: rgba(255, 255, 255, .14); }
+        .controles-zoom span { min-width: 3.4rem; text-align: center; font-size: .72rem; color: rgba(255, 255, 255, .85); }
+
+        /* Sugerencias de establecimientos */
+        .sugerencias {
+            position: absolute; left: 0; right: 0; top: 100%; z-index: 20; margin-top: 4px;
+            max-height: 260px; overflow-y: auto; padding: 4px; list-style: none;
+            background: var(--superficie); border: 1px solid var(--borde-fuerte);
+            border-radius: 10px; box-shadow: var(--sombra);
+        }
+        .sugerencias li { padding: .45rem .6rem; border-radius: 7px; cursor: pointer; }
+        .sugerencias li[aria-selected="true"], .sugerencias li:hover { background: var(--casilla); }
+        .sugerencias .sug-nombre { font-size: .85rem; font-weight: 600; }
+        .sugerencias .sug-donde { font-size: .72rem; color: var(--texto-2); }
+
+        .campo-con-boton { position: relative; }
+        .campo-con-boton .campo { padding-right: 2.4rem; }
+        /* Bolita de "verificado por Google" delante del nombre del establecimiento. */
+        .con-punto .campo { padding-left: 1.9rem; }
+        .punto-verif { position: absolute; left: .8rem; top: 50%; transform: translateY(-50%); z-index: 1;
+            width: 9px; height: 9px; border-radius: 50%; background: var(--texto-3); cursor: help; }
+        .punto-verif.si { background: var(--g); box-shadow: 0 0 0 3px color-mix(in srgb, var(--g) 22%, transparent); }
+        .boton-abrir-est { height: auto; align-self: stretch; }
+        /* Un desplegable al pie de la ficha se abre hacia arriba. */
+        .sugerencias.hacia-arriba { top: auto; bottom: 100%; margin-top: 0; margin-bottom: 4px; }
+        .boton-lista {
+            position: absolute; right: 5px; top: 50%; transform: translateY(-50%);
+            width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
+            border: 0; border-radius: 7px; background: transparent; color: var(--texto-2); cursor: pointer;
+        }
+        .boton-lista:hover { background: var(--casilla); color: var(--texto); }
+
+        .lista-est { max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; }
+        .fila-est {
+            display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: .6rem; row-gap: .1rem;
+            padding: .5rem .4rem; border: 0; border-bottom: 1px solid var(--borde);
+            background: transparent; color: inherit; font: inherit; font-size: .85rem;
+            text-align: left; cursor: pointer; transition: background .15s ease;
+        }
+        .fila-est:hover { background: var(--casilla); }
+        .fila-est > span:last-child { grid-column: 1 / -1; }
+        .punto-ubic { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: .4rem;
+                      vertical-align: middle; background: var(--g); }
+        .punto-ubic.sin { background: var(--texto-2); opacity: .5; }
+        .punto-ubic.dudoso { background: var(--o); }
+        .punto-ubic.google { background: var(--g); box-shadow: 0 0 0 2px color-mix(in srgb, var(--g) 30%, transparent); }
+
+        .pastilla-aviso {
+            border: 1px solid color-mix(in srgb, var(--o) 50%, transparent); border-radius: 999px;
+            background: color-mix(in srgb, var(--o) 12%, transparent); color: var(--texto);
+            font: inherit; font-size: .7rem; padding: .15rem .55rem; cursor: pointer;
+        }
+        .pastilla-aviso[aria-pressed="true"] { background: var(--o); color: #fff; }
+
+        .cuenta-banco { display: flex; align-items: center; gap: .75rem; padding: .6rem .75rem;
+                        border: 1px solid var(--borde); border-radius: 10px; background: var(--casilla); }
+        .cuenta-banco input { width: 18px; height: 18px; accent-color: var(--acento); }
+        .lista-mov { display: flex; flex-direction: column; max-height: 50vh; overflow-y: auto; }
+        .fila-mov { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: .75rem;
+                    padding: .5rem .2rem; border-bottom: 1px solid var(--borde); font-size: .85rem; }
+        .fila-mov .mov-concepto { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .fila-mov .mov-apoyo { grid-column: 1 / -1; font-size: .72rem; color: var(--texto-2); }
+        .fila-mov .abono { color: var(--g); }
+        .fila-mov .mov-estado { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .3rem; }
+        .chip-filtro, .chip-mov {
+            border: 1px solid var(--borde-fuerte); border-radius: 999px; background: transparent; color: var(--texto-2);
+            font: inherit; font-size: .72rem; padding: .15rem .6rem; cursor: pointer;
+        }
+        .chip-filtro[aria-pressed="true"] { background: var(--acento); color: var(--acento-texto); border-color: var(--acento); }
+        .chip-mov.ok { color: var(--g); border-color: color-mix(in srgb, var(--g) 50%, transparent); }
+        .chip-mov.falta { color: var(--o); border-color: color-mix(in srgb, var(--o) 50%, transparent); }
+        .candidatos-mov { grid-column: 1 / -1; display: flex; flex-direction: column; gap: .25rem; margin-top: .35rem; }
+        .candidatos-mov button { text-align: left; border: 1px solid var(--borde); border-radius: 8px; background: var(--casilla);
+                                 color: inherit; font: inherit; font-size: .78rem; padding: .35rem .5rem; cursor: pointer; }
+        .candidatos-mov button:hover { border-color: var(--borde-fuerte); }
+        .total-busqueda {
+            display: flex; flex-wrap: wrap; gap: .25rem .9rem; margin-top: .5rem; padding: .5rem .65rem;
+            border-radius: 9px; background: var(--casilla); border: 1px solid var(--casilla-borde); font-size: .78rem;
+        }
+        .total-busqueda b { font-variant-numeric: tabular-nums; }
+        .total-busqueda .gasto { font-size: .95rem; }
+        .total-busqueda .sale { color: var(--c-sale); }
+        .total-busqueda .entra { color: var(--g); }
+        .bizum-cuerpo { display: grid; gap: var(--hueco); }
+        @media (min-width: 1100px) { .bizum-cuerpo { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); } }
+        .bizum-calendario { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; align-content: start; }
+        .bizum-calendario.meses { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .bizum-calendario.anios { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .bizum-casilla {
+            display: flex; flex-direction: column; align-items: flex-start; gap: 0; min-height: 3.2rem;
+            padding: .25rem .35rem; border-radius: 8px; border: 1px solid var(--casilla-borde);
+            background: var(--casilla); color: inherit; font: inherit; text-align: left; cursor: pointer;
+            overflow: hidden; min-width: 0; line-height: 1.15;
+        }
+        .bizum-casilla > span { white-space: nowrap; max-width: 100%; }
+        /* Los días del mes, casi cuadrados (en vez de columnas altas). */
+        .bizum-calendario:not(.meses):not(.anios) .bizum-casilla:not(.vacia) { min-height: 0; aspect-ratio: 4 / 5; padding: .2rem .25rem; }
+        .bizum-casilla.vacia { background: transparent; border-color: transparent; cursor: default; }
+        .bizum-casilla.fuera { opacity: .35; }
+        .bizum-casilla[aria-pressed="true"] { border-color: var(--acento); box-shadow: inset 0 0 0 1px var(--acento); }
+        .bizum-casilla .num { font-size: .7rem; font-weight: 600; color: var(--texto-2); }
+        .bizum-casilla .sale { font-size: .66rem; font-weight: 700; color: var(--c-sale); }
+        .bizum-casilla .entra { font-size: .66rem; font-weight: 700; color: var(--g); }
+        .bizum-casilla .ingreso { font-size: .66rem; font-weight: 700; color: var(--c-ingreso); }
+        .bizum-cab { font-size: .62rem; font-weight: 700; text-align: center; color: var(--texto-2); }
+        .bizum-lista { max-height: 22rem; }
+        .resumen-banco { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: .5rem; padding: .7rem .9rem; }
+        .resumen-banco-item .icono-cat { width: 15px; height: 15px; }
+        .resumen-banco-item { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: .3rem; align-items: center; font-size: .78rem; color: var(--texto-2); }
+        .resumen-banco-item b { grid-column: 1 / -1; font-size: 1.05rem; color: var(--texto); }
+        .resumen-banco-item b.importe-entrada { color: var(--g); }
+        .resumen-banco-item small { grid-column: 1 / -1; font-size: .68rem; }
+        @media (max-width: 639px) { .resumen-banco { grid-template-columns: 1fr; } }
+        .icono-tipo { width: 15px; height: 15px; flex: none; margin-right: .4rem; vertical-align: -2px; color: var(--texto-2); }
+        .fila-tiquet.fila-banco .icono-tipo { color: var(--texto); }
+        .fila-tiquet .importe-entrada { color: var(--g); }
+        .fila-tiquet.no-cuenta { opacity: .55; }
+        /* Confirmado por el banco: una etiqueta pequeña, del mismo estilo neón
+           que las insignias de tipo, centrada con el nombre. */
+        .titulo-fila { display: flex; align-items: center; gap: .45rem; min-width: 0; }
+        .titulo-fila > .truncate { min-width: 0; }
+        .marca-banco {
+            flex: none; display: inline-flex; align-items: center; gap: .2rem;
+            height: 1.05rem; padding: 0 .35rem; border-radius: 5px;
+            font-size: .55rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; line-height: 1;
+            color: var(--g); background: color-mix(in srgb, var(--g) 15%, transparent);
+            border: 1px solid color-mix(in srgb, var(--g) 55%, transparent);
+        }
+        .marca-banco svg { width: .7rem; height: .7rem; }
+        /* Suscripciones: lista con acciones y puntitos en el calendario. */
+        .sus-lista { display: flex; flex-direction: column; }
+        .sus-fila {
+            display: grid; grid-template-columns: .7rem minmax(0, 1fr) auto auto; align-items: center; gap: .75rem;
+            padding: .6rem .3rem; border-bottom: 1px solid var(--borde);
+        }
+        .sus-fila:last-child { border-bottom: 0; }
+        .sus-fila.de-baja { opacity: .55; }
+        .sus-punto { width: .7rem; height: .7rem; border-radius: 50%; background: var(--c); box-shadow: 0 0 8px color-mix(in srgb, var(--c) 50%, transparent); }
+        .sus-nombre { font-weight: 600; font-size: .9rem; }
+        .sus-meta { font-size: .72rem; color: var(--texto-2); }
+        .sus-meta .pregunta { color: var(--texto); font-weight: 600; }
+        .sus-acciones { display: flex; gap: .3rem; }
+        .sus-acciones button {
+            min-width: 2rem; height: 2rem; padding: 0 .5rem; border-radius: 8px; font: inherit; font-size: .8rem; font-weight: 700;
+            border: 1px solid var(--borde-fuerte); background: var(--casilla); color: var(--texto); cursor: pointer;
+        }
+        .sus-acciones button:hover { border-color: var(--texto); }
+        .sus-acciones .si { color: var(--g); border-color: color-mix(in srgb, var(--g) 50%, transparent); }
+        .sus-acciones .no { color: var(--r); border-color: color-mix(in srgb, var(--r) 45%, transparent); }
+        .sus-descartadas { margin-top: .6rem; font-size: .8rem; }
+        .sus-descartadas summary { cursor: pointer; color: var(--texto-2); padding: .3rem 0; }
+        .puntos-sus { position: absolute; top: 4px; right: 4px; display: flex; gap: 2px; pointer-events: none; }
+        .puntos-sus i { width: 6px; height: 6px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 1px var(--superficie), 0 0 6px var(--c); }
+        /* Ficha del establecimiento: sus últimos cargos y tiquets, en pequeño. */
+        .est-actividad { padding: .6rem .75rem; border-radius: 12px; border: 1px solid var(--casilla-borde); background: var(--casilla); }
+        .est-actividad-lista { display: flex; flex-direction: column; max-height: 13rem; overflow-y: auto; margin-top: .3rem; }
+        .est-act {
+            display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: .55rem; align-items: baseline;
+            padding: .35rem .25rem; border: 0; border-bottom: 1px solid var(--borde); background: transparent;
+            color: inherit; font: inherit; font-size: .75rem; text-align: left; cursor: pointer; border-radius: 6px;
+        }
+        .est-act:last-child { border-bottom: 0; }
+        .est-act:hover { background: var(--superficie-2); }
+        .est-act .tipo { font-size: .55rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--texto-2); }
+        .est-act .detalle { grid-column: 2 / -1; color: var(--texto-2); font-size: .68rem; word-break: break-word; }
+        .icono-mini { display: inline-block; width: 12px; height: 12px; margin-left: 2px; vertical-align: -2px; }
+        .banco-sync { padding: .65rem .8rem; border-radius: 12px; background: var(--casilla); border: 1px solid var(--casilla-borde); font-size: .8rem; }
+        .banco-sync .linea { display: flex; justify-content: space-between; gap: .75rem; padding: .12rem 0; }
+        .banco-sync .linea span:first-child { color: var(--texto-2); }
+        .banco-sync .ok { color: var(--g); font-weight: 600; }
+        .banco-sync .aviso { color: var(--o); font-weight: 600; }
+        /* Todas las casillas de verificación, con el acento del tema. */
+        input[type="checkbox"] { accent-color: var(--acento); width: 17px; height: 17px; cursor: pointer; vertical-align: -3px; }
+        /* Desplegable propio en lugar del <select> nativo (que el sistema pinta a
+           su manera): el mismo aspecto que los campos con lista. */
+        .select-bonito-boton { text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .select-bonito .boton-lista { pointer-events: none; }
+        .select-bonito-boton:disabled { opacity: .55; cursor: default; }
+        .candidatos-mov:empty { display: none; }
+        /* ═══ FICHAS: el mismo esqueleto para tiquet, movimiento, establecimiento
+           y suscripción. Arriba, "← volver" (si se llegó desde otra ficha) y la
+           etiqueta de tipo con el color del historial; debajo, el resumen; lo
+           secundario, en plegables que enseñan su valor sin abrirse. ═══ */
+        .ficha-volver {
+            display: inline-flex; align-items: center; gap: .3rem; max-width: 100%; margin-bottom: .5rem;
+            padding: .22rem .6rem; border-radius: 999px; border: 1px solid var(--borde-fuerte);
+            background: var(--casilla); color: var(--texto-2); font: inherit; font-size: .72rem; cursor: pointer;
+        }
+        .ficha-volver:hover { color: var(--texto); border-color: var(--texto-2); }
+        .ficha-volver span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ficha-tipo {
+            display: inline-flex; align-items: center; gap: .3rem; margin-bottom: .35rem;
+            padding: .18rem .5rem; border-radius: 6px; font-size: .6rem; font-weight: 800;
+            letter-spacing: .09em; text-transform: uppercase; color: var(--tipo);
+            background: color-mix(in srgb, var(--tipo) 15%, transparent);
+            border: 1px solid color-mix(in srgb, var(--tipo) 50%, transparent);
+            box-shadow: 0 0 8px color-mix(in srgb, var(--tipo) 20%, transparent);
+        }
+        .ficha-tipo svg { width: 12px; height: 12px; flex: none; }
+        .tipo-est { --tipo: #b7791f; }
+        .tipo-sus { --tipo: var(--cat-suscripciones); }
+        @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tipo-est { --tipo: #f2c35b; } }
+        :root[data-theme="dark"] .tipo-est { --tipo: #f2c35b; }
+        .ficha-resumen { padding: .8rem 1rem; border-radius: 12px; background: var(--casilla); border: 1px solid var(--casilla-borde); }
+
+        .plegable { border: 1px solid var(--casilla-borde); border-radius: 12px; background: var(--casilla); }
+        .plegable > summary {
+            list-style: none; cursor: pointer; display: flex; align-items: center; gap: .6rem;
+            padding: .65rem .85rem; font-size: .85rem;
+        }
+        .plegable > summary::-webkit-details-marker { display: none; }
+        .plegable > summary .pl-titulo { font-weight: 600; white-space: nowrap; }
+        .plegable > summary .pl-valor {
+            margin-left: auto; min-width: 0; color: var(--texto-2); font-size: .78rem; text-align: right;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .plegable > summary::after { content: "›"; color: var(--texto-2); font-size: 1.1rem; line-height: 1; transition: transform .18s ease; }
+        .plegable[open] > summary::after { transform: rotate(90deg); }
+        .plegable > summary:hover .pl-titulo { color: var(--texto); }
+        .plegable-cuerpo { padding: 0 .85rem .85rem; display: flex; flex-direction: column; gap: .6rem; }
+        .pl-valor .ok { color: var(--g); font-weight: 600; }
+        /* Pago del banco: con el color del tema si está enlazado, apagado si no. */
+        .pago-tiquet.enlazado { border-color: color-mix(in srgb, var(--acento) 55%, transparent);
+            background: color-mix(in srgb, var(--acento) 9%, var(--casilla)); }
+        .pago-tiquet.enlazado > summary .pl-titulo,
+        .pago-tiquet.enlazado > summary .pl-valor { color: var(--acento); }
+        .pago-tiquet.sin-enlazar > summary .pl-titulo { color: var(--texto-2); font-weight: 500; }
+        .pago-tiquet.sin-enlazar > summary .pl-valor { color: var(--texto-3); }
+        .pago-tiquet.sin-enlazar { background: transparent; }
+        .pl-valor .aviso { color: var(--o); font-weight: 600; }
+        /* "?" con la explicación al pasar el ratón: en vez de frases fijas. */
+        .ayuda {
+            display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px;
+            margin-left: .3rem; border-radius: 50%; border: 1px solid var(--borde-fuerte);
+            font-size: .6rem; font-weight: 800; color: var(--texto-2); cursor: help; vertical-align: 1px;
+        }
+        .fila-check { display: flex; align-items: center; gap: .6rem; padding: .55rem .85rem; border-radius: 12px;
+            background: var(--casilla); border: 1px solid var(--casilla-borde); font-size: .85rem; cursor: pointer; }
+        .aviso-ficha { padding: .7rem .85rem; border-radius: 12px; font-size: .85rem;
+            background: color-mix(in srgb, var(--o) 12%, transparent); border: 1px solid color-mix(in srgb, var(--o) 45%, transparent); }
+
+        /* Buscador unificado de establecimientos: tuyos al escribir, Google al
+           pulsar, y crear uno nuevo. */
+        .buscador-est {
+            position: absolute; left: 0; right: 0; top: 100%; margin-top: 4px; z-index: 30;
+            max-height: 22rem; overflow-y: auto; padding: .35rem;
+            background: var(--superficie); border: 1px solid var(--borde-fuerte); border-radius: 12px; box-shadow: var(--sombra);
+        }
+        .bq-grupo {
+            display: flex; align-items: center; justify-content: space-between; gap: .5rem;
+            padding: .45rem .55rem .2rem; font-size: .6rem; font-weight: 800; letter-spacing: .1em;
+            text-transform: uppercase; color: var(--texto-2);
+        }
+        .bq-fila { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: .6rem; padding: .45rem .55rem; border-radius: 8px; cursor: pointer; }
+        .bq-fila[aria-selected="true"], .bq-fila:hover { background: var(--casilla); }
+        .bq-nombre { font-weight: 600; font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .bq-donde { grid-column: 1; font-size: .72rem; color: var(--texto-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .bq-accion { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-size: .7rem; font-weight: 700; color: var(--texto-2); white-space: nowrap; }
+        .bq-fila:hover .bq-accion, .bq-fila[aria-selected="true"] .bq-accion { color: var(--texto); }
+        .bq-boton {
+            font: inherit; font-size: .68rem; font-weight: 700; letter-spacing: 0; text-transform: none;
+            padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--borde-fuerte);
+            background: var(--casilla); color: var(--texto); cursor: pointer;
+        }
+        .bq-boton:disabled { opacity: .5; cursor: default; }
+        .bq-vacio { font-size: .75rem; color: var(--texto-2); padding: .25rem .55rem .45rem; }
+
+        .com-opciones { display: flex; flex-wrap: wrap; gap: .45rem; }
+        .com-opciones button { min-width: 3rem; height: 2.6rem; padding: 0 .8rem; border-radius: 10px;
+            border: 1px solid var(--borde-fuerte); background: var(--casilla); font-weight: 600; }
+        .com-opciones button[aria-pressed="true"] { background: var(--acento); color: var(--acento-texto); border-color: var(--acento); }
+        .com-opciones input { width: 4.5rem; height: 2.6rem; text-align: center; }
+        .mov-cabecera { padding: .8rem 1rem; border-radius: 12px; background: var(--casilla); border: 1px solid var(--casilla-borde); }
+        .mov-detalles { display: grid; grid-template-columns: max-content 1fr; gap: .35rem 1rem; font-size: .85rem; }
+        .mov-detalles dt { color: var(--texto-2); }
+        .mov-detalles dd { margin: 0; word-break: break-word; }
+        .mov-est { padding: .8rem 1rem; border-radius: 12px; border: 1px solid var(--casilla-borde); }
+        .mov-est .est-nombre { font-weight: 600; }
+        .mov-est .est-donde { color: var(--texto-2); font-size: .8rem; }
+        .enlace-boton { background: none; border: 0; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; }
+        .mov-concepto-completo { font-size: .78rem; color: var(--texto-2); word-break: break-word; margin-top: .25rem; }
+        /* En la ficha del movimiento la lista de categorías se abre DENTRO del
+           formulario (empuja lo de abajo) en vez de flotar: flotando se cortaba
+           con el borde del diálogo. */
+        .sugerencias.sugerencias-en-linea { position: static; max-height: 15rem; margin-top: .3rem; width: 100%; }
+        .bloque-compartido { padding: .6rem .75rem; border: 1px solid var(--borde); border-radius: 10px; background: var(--casilla); }
+        .marca-compartido { font-size: .7rem; color: var(--texto-2); font-weight: 400; }
+        .bloque-google { padding: .75rem; border: 1px solid var(--borde); border-radius: 10px; background: var(--casilla); }
+        .bloque-google .verificado { color: var(--g); font-weight: 600; }
+        .lista-candidatos { display: flex; flex-direction: column; gap: .4rem; margin-top: .5rem; }
+        .lista-candidatos:empty { display: none; }
+        .candidato {
+            display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .15rem .6rem; align-items: center;
+            padding: .5rem .6rem; border: 1px solid var(--borde); border-radius: 8px; background: var(--superficie);
+        }
+        .candidato .c-nombre { font-weight: 600; font-size: .85rem; }
+        .candidato .c-donde { grid-column: 1; font-size: .75rem; color: var(--texto-2); }
+        .candidato .c-acciones { grid-column: 2; grid-row: 1 / span 2; display: flex; flex-direction: column; gap: .25rem; align-items: flex-end; }
+        .candidato a { font-size: .7rem; color: var(--texto-2); }
+        .enlace-discreto { border: 0; background: none; padding: 0; font: inherit; font-size: .75rem;
+                           color: var(--texto-2); text-decoration: underline; cursor: pointer; }
+
+        /* Editor: lo esencial arriba y apartados plegados */
+        .campo-grande { font-size: 1rem; font-weight: 600; }
+        .resumen-ubicacion { font-size: .8rem; color: var(--texto); line-height: 1.35; }
+        .resumen-ubicacion .estado-ubic { font-size: .72rem; color: var(--texto-2); }
+        .resumen-ubicacion .estado-ubic.mal { color: var(--aviso); }
+        .apartado { border: 1px solid var(--borde); border-radius: 10px; }
+        .apartado > summary {
+            list-style: none; cursor: pointer; padding: .6rem .8rem;
+            font-size: .8rem; font-weight: 600; color: var(--texto-2);
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .apartado > summary::-webkit-details-marker { display: none; }
+        .apartado > summary::after { content: "›"; font-size: 1.1rem; transition: transform .18s ease; }
+        .apartado[open] > summary::after { transform: rotate(90deg); }
+        .apartado > summary:hover { color: var(--texto); }
+        .apartado-cuerpo { padding: 0 .8rem .8rem; }
+
+        .cerrar-subida {
+            position: absolute; top: .5rem; right: .6rem; z-index: 2;
+            width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
+            border: 0; border-radius: 8px; background: transparent; color: var(--texto-2);
+            font-size: 1.35rem; line-height: 1; cursor: pointer;
+        }
+        .cerrar-subida:hover { background: var(--casilla); color: var(--texto); }
+
+        /* LIMA: verde lima y violeta eléctrico (#8eff01, #8b53fe) sobre noche
+           violeta. En oscuro el acento es el lima; en claro, el violeta (el
+           lima sobre blanco no se leería). */
+        :root[data-paleta="lima"][data-theme="light"] {
+                --fondo: hsl(268 70% 97%);
+                --blob-1: hsl(262 90% 72%); --blob-2: hsl(86 95% 60%); --blob-3: hsl(285 75% 78%);
+                --blob-4: hsl(250 75% 82%); --blob-5: hsl(78 90% 78%); --blob-6: #ffffff;
+                --superficie: hsl(265 70% 99%); --superficie-2: hsl(262 90% 60% / .12);
+                --borde: hsl(265 50% 22% / .10); --borde-fuerte: hsl(265 50% 22% / .19);
+                --texto: hsl(268 50% 13%); --texto-2: hsl(266 32% 42%);
+                --acento: hsl(262 85% 48%); --acento-texto: hsl(85 100% 92%);
+                --acento-suave: hsl(262 90% 60% / .16);
+                --finde: hsl(86 90% 48% / .20); --finde-texto: hsl(96 75% 28%);
+                --casilla-borde: hsl(265 50% 22% / .11);
+                --punto: hsl(262 90% 58%); --punto-borde: #ffffff;
+                --sombra: 0 18px 50px hsl(262 80% 45% / .18);
+        }
+        @media (prefers-color-scheme: light) {
+            :root[data-paleta="lima"]:not([data-theme="dark"]) {
+                --fondo: hsl(268 70% 97%);
+                --blob-1: hsl(262 90% 72%); --blob-2: hsl(86 95% 60%); --blob-3: hsl(285 75% 78%);
+                --blob-4: hsl(250 75% 82%); --blob-5: hsl(78 90% 78%); --blob-6: #ffffff;
+                --superficie: hsl(265 70% 99%); --superficie-2: hsl(262 90% 60% / .12);
+                --borde: hsl(265 50% 22% / .10); --borde-fuerte: hsl(265 50% 22% / .19);
+                --texto: hsl(268 50% 13%); --texto-2: hsl(266 32% 42%);
+                --acento: hsl(262 85% 48%); --acento-texto: hsl(85 100% 92%);
+                --acento-suave: hsl(262 90% 60% / .16);
+                --finde: hsl(86 90% 48% / .20); --finde-texto: hsl(96 75% 28%);
+                --casilla-borde: hsl(265 50% 22% / .11);
+                --punto: hsl(262 90% 58%); --punto-borde: #ffffff;
+                --sombra: 0 18px 50px hsl(262 80% 45% / .18);
+            }
+        }
+        :root[data-paleta="lima"][data-theme="dark"] {
+                --fondo: hsl(262 55% 4%);
+                --blob-1: hsl(262 92% 34%); --blob-2: hsl(86 100% 30%); --blob-3: hsl(272 85% 46%);
+                --blob-4: hsl(268 75% 6%); --blob-5: hsl(245 45% 8%); --blob-6: hsl(84 100% 42%);
+                --blob-opacidad: .72;
+                --vidrio: hsl(262 45% 8% / .55); --vidrio-linea: hsl(265 90% 80% / .16);
+                --superficie: hsl(262 38% 10%); --superficie-2: hsl(265 90% 75% / .14);
+                --borde: hsl(265 60% 85% / .11); --borde-fuerte: hsl(265 60% 85% / .24);
+                --texto: hsl(265 40% 96%); --texto-2: hsl(265 30% 76%);
+                --acento: hsl(86 100% 52%); --acento-texto: hsl(262 60% 8%);
+                --acento-suave: hsl(86 100% 52% / .16);
+                --finde: hsl(262 95% 66% / .24); --finde-texto: hsl(265 100% 84%);
+                --casilla: hsl(265 70% 80% / .07); --casilla-borde: hsl(265 60% 85% / .13);
+                --punto: hsl(86 100% 52%); --punto-borde: hsl(262 60% 8%);
+                --sombra: 0 18px 50px rgba(0, 0, 0, .55);
+        }
+        @media (prefers-color-scheme: dark) {
+            :root[data-paleta="lima"]:not([data-theme="light"]) {
+                --fondo: hsl(262 55% 4%);
+                --blob-1: hsl(262 92% 34%); --blob-2: hsl(86 100% 30%); --blob-3: hsl(272 85% 46%);
+                --blob-4: hsl(268 75% 6%); --blob-5: hsl(245 45% 8%); --blob-6: hsl(84 100% 42%);
+                --blob-opacidad: .72;
+                --vidrio: hsl(262 45% 8% / .55); --vidrio-linea: hsl(265 90% 80% / .16);
+                --superficie: hsl(262 38% 10%); --superficie-2: hsl(265 90% 75% / .14);
+                --borde: hsl(265 60% 85% / .11); --borde-fuerte: hsl(265 60% 85% / .24);
+                --texto: hsl(265 40% 96%); --texto-2: hsl(265 30% 76%);
+                --acento: hsl(86 100% 52%); --acento-texto: hsl(262 60% 8%);
+                --acento-suave: hsl(86 100% 52% / .16);
+                --finde: hsl(262 95% 66% / .24); --finde-texto: hsl(265 100% 84%);
+                --casilla: hsl(265 70% 80% / .07); --casilla-borde: hsl(265 60% 85% / .13);
+                --punto: hsl(86 100% 52%); --punto-borde: hsl(262 60% 8%);
+                --sombra: 0 18px 50px rgba(0, 0, 0, .55);
+            }
+        }
+
+        /* LIMA: además del fondo, etiquetas rellenas con los dos colores
+           eléctricos (texto negro sobre lima, blanco sobre violeta, por
+           contraste) para que la paleta se note en los paneles. */
+        :root[data-paleta="lima"] { --lima: #8eff01; --violeta: #8b53fe; --sobre-lima: #0d0718; --sobre-violeta: #ffffff; }
+        /* Solo dos recuadros enteros, los que más importan: el gasto de este
+           mes (lima) y el gasto del periodo que se está viendo (violeta). */
+        :root[data-paleta="lima"] .rejilla-cifras > .tarjeta:first-child {
+            background: var(--lima); border-color: transparent; color: var(--sobre-lima);
+            box-shadow: 0 0 26px color-mix(in srgb, var(--lima) 30%, transparent), var(--sombra);
+        }
+        :root[data-paleta="lima"] .rejilla-cifras > .tarjeta:first-child .titulo-seccion { color: var(--sobre-lima); }
+        :root[data-paleta="lima"] #kpiMesVariacion,
+        :root[data-paleta="lima"] #kpiMesVariacion * { color: color-mix(in srgb, var(--sobre-lima) 72%, transparent) !important; }
+        :root[data-paleta="lima"] #kpiMesVariacion .cifra { color: var(--sobre-lima) !important; }
+        :root[data-paleta="lima"] .cifras-periodo:not(#bizumCifras) > .cifra-periodo:first-child {
+            background: var(--violeta); border-color: transparent; color: var(--sobre-violeta);
+            box-shadow: 0 0 18px color-mix(in srgb, var(--violeta) 35%, transparent);
+        }
+        :root[data-paleta="lima"] .cifras-periodo:not(#bizumCifras) > .cifra-periodo:first-child .etiqueta-cifra,
+        :root[data-paleta="lima"] .cifras-periodo:not(#bizumCifras) > .cifra-periodo:first-child small { color: color-mix(in srgb, var(--sobre-violeta) 80%, transparent); }
+        :root[data-paleta="lima"] .segmento[aria-selected="true"] {
+            background: var(--violeta); color: var(--sobre-violeta); opacity: 1;
+            box-shadow: 0 0 12px color-mix(in srgb, var(--violeta) 45%, transparent);
+        }
+        :root[data-paleta="lima"] .chip-control { background: color-mix(in srgb, var(--violeta) 22%, transparent); }
+        :root[data-paleta="lima"] .chip-control b { color: var(--lima); }
+        :root[data-paleta="lima"][data-theme="light"] .chip-control b { color: var(--violeta); }
+        @media (prefers-color-scheme: light) {
+            :root[data-paleta="lima"]:not([data-theme="dark"]) .chip-control b { color: var(--violeta); }
+        }
+
+        /* LIMA: la escala del calendario y los colores del donut, también
+           dentro de la paleta (lima → violeta → magenta para poco → mucho
+           gasto). Solo en este tema: los demás conservan los suyos. */
+        :root[data-paleta="lima"][data-theme="light"] {
+                --g: hsl(90 85% 36%); --o: hsl(262 78% 56%); --r: hsl(315 80% 47%); --peligro: hsl(325 75% 45%);
+                --cat-alimentacion: hsl(90 85% 38%); --cat-restauracion: hsl(262 78% 56%);
+                --cat-transporte: hsl(155 80% 36%); --cat-ocio: hsl(315 80% 47%);
+                --cat-ropa: hsl(285 60% 55%); --cat-hogar: hsl(62 85% 40%);
+                --cat-electronica: hsl(175 75% 34%); --cat-salud: hsl(335 80% 52%);
+                --cat-suscripciones: hsl(245 70% 58%); --cat-bizum: hsl(100 60% 48%);
+                --cat-transferencia: hsl(265 30% 52%); --cat-comisiones: hsl(300 35% 45%);
+                --cat-ingresos: hsl(150 60% 40%); --cat-otros: hsl(265 15% 58%); --cat-otras: hsl(265 15% 72%);
+                --cat-r1: hsl(198 75% 45%); --cat-r2: hsl(275 55% 50%); --cat-r3: hsl(75 70% 36%); --cat-r4: hsl(322 60% 45%);
+                --c-sale: hsl(315 80% 46%); --c-ingreso: hsl(205 80% 42%);
+        }
+        @media (prefers-color-scheme: light) {
+            :root[data-paleta="lima"]:not([data-theme="dark"]) {
+                --g: hsl(90 85% 36%); --o: hsl(262 78% 56%); --r: hsl(315 80% 47%); --peligro: hsl(325 75% 45%);
+                --cat-alimentacion: hsl(90 85% 38%); --cat-restauracion: hsl(262 78% 56%);
+                --cat-transporte: hsl(155 80% 36%); --cat-ocio: hsl(315 80% 47%);
+                --cat-ropa: hsl(285 60% 55%); --cat-hogar: hsl(62 85% 40%);
+                --cat-electronica: hsl(175 75% 34%); --cat-salud: hsl(335 80% 52%);
+                --cat-suscripciones: hsl(245 70% 58%); --cat-bizum: hsl(100 60% 48%);
+                --cat-transferencia: hsl(265 30% 52%); --cat-comisiones: hsl(300 35% 45%);
+                --cat-ingresos: hsl(150 60% 40%); --cat-otros: hsl(265 15% 58%); --cat-otras: hsl(265 15% 72%);
+                --cat-r1: hsl(198 75% 45%); --cat-r2: hsl(275 55% 50%); --cat-r3: hsl(75 70% 36%); --cat-r4: hsl(322 60% 45%);
+                --c-sale: hsl(315 80% 46%); --c-ingreso: hsl(205 80% 42%);
+            }
+        }
+        :root[data-paleta="lima"][data-theme="dark"] {
+                --g: hsl(86 95% 55%); --o: hsl(262 100% 73%); --r: hsl(312 95% 64%); --peligro: hsl(325 90% 66%);
+                --cat-alimentacion: hsl(86 95% 55%); --cat-restauracion: hsl(262 100% 73%);
+                --cat-transporte: hsl(152 95% 50%); --cat-ocio: hsl(312 95% 64%);
+                --cat-ropa: hsl(285 80% 72%); --cat-hogar: hsl(63 95% 56%);
+                --cat-electronica: hsl(172 85% 48%); --cat-salud: hsl(332 92% 67%);
+                --cat-suscripciones: hsl(245 90% 74%); --cat-bizum: hsl(102 85% 71%);
+                --cat-transferencia: hsl(265 40% 62%); --cat-comisiones: hsl(300 45% 58%);
+                --cat-ingresos: hsl(150 70% 62%); --cat-otros: hsl(265 22% 56%); --cat-otras: hsl(265 18% 40%);
+                --cat-r1: hsl(198 85% 62%); --cat-r2: hsl(275 70% 58%); --cat-r3: hsl(75 80% 46%); --cat-r4: hsl(322 70% 52%);
+                --c-sale: hsl(312 95% 66%); --c-ingreso: hsl(198 90% 64%);
+        }
+        @media (prefers-color-scheme: dark) {
+            :root[data-paleta="lima"]:not([data-theme="light"]) {
+                --g: hsl(86 95% 55%); --o: hsl(262 100% 73%); --r: hsl(312 95% 64%); --peligro: hsl(325 90% 66%);
+                --cat-alimentacion: hsl(86 95% 55%); --cat-restauracion: hsl(262 100% 73%);
+                --cat-transporte: hsl(152 95% 50%); --cat-ocio: hsl(312 95% 64%);
+                --cat-ropa: hsl(285 80% 72%); --cat-hogar: hsl(63 95% 56%);
+                --cat-electronica: hsl(172 85% 48%); --cat-salud: hsl(332 92% 67%);
+                --cat-suscripciones: hsl(245 90% 74%); --cat-bizum: hsl(102 85% 71%);
+                --cat-transferencia: hsl(265 40% 62%); --cat-comisiones: hsl(300 45% 58%);
+                --cat-ingresos: hsl(150 70% 62%); --cat-otros: hsl(265 22% 56%); --cat-otras: hsl(265 18% 40%);
+                --cat-r1: hsl(198 85% 62%); --cat-r2: hsl(275 70% 58%); --cat-r3: hsl(75 80% 46%); --cat-r4: hsl(322 70% 52%);
+                --c-sale: hsl(312 95% 66%); --c-ingreso: hsl(198 90% 64%);
+            }
+        }
+
+        /* LIMA: el calendario, más sutil: menos tinte y borde más suave (la
+           escala sigue leyéndose por la barrita de color). */
+        :root[data-paleta="lima"] .con-gasto.nivel-g { background: color-mix(in srgb, color-mix(in srgb, var(--g) 70%, var(--texto-2)) 10%, transparent) !important; border-color: color-mix(in srgb, color-mix(in srgb, var(--g) 70%, var(--texto-2)) 30%, transparent) !important; }
+        :root[data-paleta="lima"] .con-gasto.nivel-o { background: color-mix(in srgb, var(--o) 15%, transparent) !important; border-color: color-mix(in srgb, var(--o) 42%, transparent) !important; }
+        :root[data-paleta="lima"] .con-gasto.nivel-r { background: color-mix(in srgb, var(--r) 17%, transparent) !important; border-color: color-mix(in srgb, var(--r) 48%, transparent) !important; }
+
+        /* Selector de paleta */
+        .menu-paleta {
+            position: absolute; right: 0; top: calc(100% + 6px); z-index: 1300;
+            display: flex; flex-direction: column; gap: 2px; min-width: 150px; padding: 6px;
+            background: var(--superficie); border: 1px solid var(--borde-fuerte);
+            border-radius: 12px; box-shadow: var(--sombra);
+        }
+        .menu-paleta button {
+            display: flex; align-items: center; gap: .6rem; padding: .45rem .6rem;
+            border: 0; border-radius: 8px; background: transparent; color: var(--texto);
+            font: inherit; font-size: .85rem; text-align: left; cursor: pointer;
+        }
+        .menu-paleta button:hover { background: var(--casilla); }
+        .menu-paleta button[aria-checked="true"] { background: var(--acento-suave); font-weight: 700; }
+        .menu-paleta i { width: 18px; height: 18px; border-radius: 6px; flex: 0 0 auto; border: 1px solid var(--borde-fuerte); }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           BASE
+           ═══════════════════════════════════════════════════════════════════ */
+        * { box-sizing: border-box; }
+        html { -webkit-text-size-adjust: 100%; }
+        body {
+            margin: 0;
+            min-height: 100%;
+            background-color: var(--fondo);
+            color: var(--texto);
+            font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                  "Helvetica Neue", Arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+        /* Las cifras se comparan en vertical: todas con el mismo ancho. */
+        .cifra { font-variant-numeric: tabular-nums; }
+
+        ::selection { background: var(--acento-suave); }
+        :focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; border-radius: 6px; }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           FONDO ORGÁNICO
+           Seis manchas difuminadas con deriva lenta y una capa de grano. Es el
+           fondo de la página, no un adorno de un bloque: todo lo demás va
+           encima, sobre vidrio, y por eso el texto necesita el contraste que
+           dan --texto y --texto-2 (no gris claro sobre color).
+           ═══════════════════════════════════════════════════════════════════ */
+        .fondo { position: fixed; inset: 0; z-index: 0; overflow: hidden; background: var(--fondo); pointer-events: none; }
+        .fondo i {
+            position: absolute; display: block; border-radius: 50%;
+            opacity: var(--blob-opacidad); filter: blur(90px); will-change: transform;
+            animation: deriva 38s ease-in-out infinite alternate;
+        }
+        .fondo .b1 { width: 70vmax; height: 55vmax; left: -25vmax; top: -18vmax; background: var(--blob-1); transform: rotate(-18deg); }
+        .fondo .b2 { width: 65vmax; height: 50vmax; left: -20vmax; bottom: -22vmax; background: var(--blob-2); animation-duration: 46s; }
+        .fondo .b3 { width: 60vmax; height: 70vmax; right: -28vmax; top: -10vmax; background: var(--blob-3); animation-duration: 52s; animation-delay: -12s; }
+        .fondo .b4 { width: 55vmax; height: 40vmax; left: 25%; bottom: -20vmax; background: var(--blob-4); animation-duration: 41s; animation-delay: -20s; }
+        .fondo .b5 { width: 45vmax; height: 38vmax; right: -12vmax; bottom: -14vmax; background: var(--blob-5); animation-duration: 57s; animation-delay: -6s; }
+        .fondo .b6 { width: 50vmax; height: 34vmax; left: 30%; top: 18%; background: var(--blob-6); opacity: calc(var(--blob-opacidad) * .7); animation-duration: 63s; }
+        @keyframes deriva {
+            0%   { transform: translate(0, 0) rotate(0deg) scale(1); }
+            50%  { transform: translate(4vmax, -3vmax) rotate(8deg) scale(1.06); }
+            100% { transform: translate(-3vmax, 4vmax) rotate(-6deg) scale(.96); }
+        }
+        .fondo::after {
+            content: ""; position: absolute; inset: -50%;
+            opacity: var(--grano-opacidad); mix-blend-mode: var(--grano-mezcla);
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/><feComponentTransfer><feFuncR type='linear' slope='2.2' intercept='-.6'/><feFuncG type='linear' slope='2.2' intercept='-.6'/><feFuncB type='linear' slope='2.2' intercept='-.6'/><feFuncA type='linear' slope='0' intercept='1'/></feComponentTransfer></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+        }
+        /* Quien pide menos movimiento no ve ninguno. */
+        @media (prefers-reduced-motion: reduce) {
+            .fondo i { animation: none; }
+            * { transition-duration: .01ms !important; }
+        }
+        .capa { position: relative; z-index: 1; }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           PIEZAS
+           ═══════════════════════════════════════════════════════════════════ */
+        .tarjeta {
+            background: var(--vidrio);
+            border: 1px solid var(--vidrio-linea);
+            border-radius: var(--radio);
+            box-shadow: var(--sombra);
+            min-width: 0;
+            -webkit-backdrop-filter: blur(22px) saturate(140%);
+            backdrop-filter: blur(22px) saturate(140%);
+        }
+        @media (max-width: 600px) { .tarjeta { border-radius: 12px; } }
+
+        /* Cabecera pequeña: mayúsculas espaciadas. */
+        .titulo-seccion {
+            font-size: .8rem; font-weight: 800; letter-spacing: .12em;
+            text-transform: uppercase; color: var(--texto);
+        }
+        /* Titular grande: el que lleva el peso de la jerarquía. */
+        .titulo-grande {
+            font-size: clamp(26px, 3.6vw, 40px); font-weight: 800;
+            letter-spacing: -.035em; line-height: 1.02; margin: 0;
+        }
+        .cifra-grande {
+            font-size: clamp(22px, 2.6vw, 30px); font-weight: 800;
+            letter-spacing: -.03em; line-height: 1.05;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .boton {
+            display: inline-flex; align-items: center; justify-content: center; gap: .4rem;
+            font: inherit; font-size: .875rem; color: var(--texto);
+            background: var(--vidrio);
+            border: 1px solid var(--borde-fuerte); border-radius: var(--radio-control);
+            height: var(--alto-control); padding: 0 14px;
+            cursor: pointer; line-height: 1; white-space: nowrap;
+            -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+            transition: background .18s ease, border-color .18s ease, transform .1s ease, opacity .18s ease;
+        }
+        .boton:hover { border-color: var(--texto); }
+        .boton:active { transform: translateY(1px); }
+        .boton:disabled { opacity: .5; cursor: default; transform: none; }
+        .boton-acento { background: var(--acento); color: var(--acento-texto); border-color: var(--acento); font-weight: 600; }
+        .boton-acento:hover { filter: brightness(1.08); }
+        .boton-plano { background: transparent; border-color: transparent; color: var(--texto-2); }
+        .boton-plano:hover { background: var(--superficie-2); color: var(--texto); border-color: transparent; }
+        .boton-peligro { color: var(--peligro); border-color: var(--peligro); background: transparent; }
+        .boton-peligro:hover { background: color-mix(in srgb, var(--peligro) 12%, transparent); }
+        /* Solo para botones que viven DENTRO de una linea de texto (la linea de
+           control, los avisos del lote). Los de una fila de acciones no lo usan:
+           alli todos miden lo mismo. */
+        .boton-sm { height: 30px; padding: 0 10px; font-size: .8rem; border-radius: 8px; }
+        .boton-grande { height: 46px; padding: 0 18px; font-size: 1rem; border-radius: 10px; }
+        .boton-icono { width: var(--alto-control); padding: 0; font-size: 20px; }
+
+        .campo {
+            width: 100%; font: inherit; font-size: .875rem; color: var(--texto);
+            background: var(--vidrio);
+            border: 1px solid var(--borde-fuerte); border-radius: var(--radio-control);
+            min-height: var(--alto-control); padding: 7px 10px;
+            -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+            transition: border-color .18s ease;
+        }
+        .campo::placeholder { color: var(--texto-2); }
+        .campo:focus { outline: none; border-color: var(--acento); }
+        .etiqueta { display: block; font-size: .75rem; color: var(--texto-2); margin-bottom: .25rem; font-weight: 500; }
+
+        /* Selector tipo píldora: periodo y pestañas del móvil. */
+        .segmentos {
+            display: inline-flex; width: max-content; padding: 3px; gap: 2px;
+            background: var(--superficie-2); border-radius: 10px;
+        }
+        .segmento {
+            all: unset; cursor: pointer; padding: 6px 14px; border-radius: 8px;
+            font-size: .82rem; font-weight: 600; color: var(--texto-2);
+            text-align: center; transition: background .18s ease, color .18s ease;
+        }
+        .segmento[aria-selected="true"] {
+            background: var(--superficie); color: var(--texto);
+            box-shadow: 0 1px 4px rgba(0, 0, 0, .08);
+        }
+
+        /* Una fila del historial. */
+        .fila-tiquet {
+            display: grid; grid-template-columns: 1fr auto; gap: .1rem .75rem;
+            width: 100%; text-align: left; padding: .75rem 1.2rem .75rem 1.5rem;
+            border: 0; border-bottom: 1px solid var(--borde);
+            background: transparent; cursor: pointer; color: inherit; font: inherit;
+            transition: background .18s ease;
+        }
+        .fila-tiquet:hover { background: var(--superficie-2); }
+        .fila-tiquet:last-child { border-bottom: 0; }
+        .fila-apoyo { grid-column: 1 / -1; }
+
+        /* QUÉ ES CADA FILA: una insignia a la izquierda, icono encima del texto,
+           con un color por tipo para que se agrupen de un vistazo. Con
+           insignia, la rejilla gana una columna y el resto se corre a la derecha. */
+        .fila-tiquet.con-tipo { grid-template-columns: 1.55rem minmax(0, 1fr) auto; column-gap: .8rem; align-items: center; }
+        .fila-tiquet.con-tipo .fila-apoyo, .fila-tiquet.con-tipo .barra-fila { grid-column: 2 / -1; }
+        /* La insignia es más alta que las dos líneas de texto: el nombre se
+           pega abajo de su fila y el detalle arriba de la suya, juntos en el
+           centro, en vez de repartirse el alto y dejar un hueco entre ellos. */
+        .fila-tiquet.con-tipo { row-gap: .15rem; }
+        .fila-tiquet.con-tipo > :nth-child(2), .fila-tiquet.con-tipo > :nth-child(3) { align-self: end; }
+        .fila-tiquet.con-tipo > .fila-apoyo { align-self: start; }
+        /* Una tira estrecha estilo neón: tinte del color, borde y texto del
+           mismo color, el icono arriba y el texto en vertical (de abajo
+           arriba), para ocupar lo mínimo de ancho. */
+        .tipo-fila {
+            grid-row: 1 / span 2; align-self: stretch;
+            display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .2rem;
+            border-radius: 7px; padding: .2rem 0; min-height: 0; gap: .15rem;
+            color: var(--tipo); background: color-mix(in srgb, var(--tipo) 16%, transparent);
+            border: 1px solid color-mix(in srgb, var(--tipo) 55%, transparent);
+            box-shadow: 0 0 8px color-mix(in srgb, var(--tipo) 22%, transparent);
+        }
+        .tipo-fila svg { width: 12px; height: 12px; flex: none; }
+        .tipo-fila small {
+            writing-mode: vertical-rl; transform: rotate(180deg);
+            font-size: .5rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; line-height: 1;
+        }
+        /* Colores de categoría (donut): sacados de los que ya usa la página —el
+           verde/naranja/rojo de los niveles y los neones de las insignias de
+           tipo— y mezclas entre ellos, así que cambian con el tema igual que todo. */
+        :root {
+            --t-azul: #4a5ae8; --t-teal: #0c8f9a; --t-naranja: #dc5d1e; --t-verde: #18904d; --t-morado: #8b4ccc;
+            /* Lo que sale (Bizum enviados) y los ingresos, en el panel de Bizum. */
+            --c-sale: #dc5d1e; --c-ingreso: #3a7bd5;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root:not([data-theme="light"]) { --t-azul: #9aa5ff; --t-teal: #54d6de; --t-naranja: #ffa066; --t-verde: #63db96; --t-morado: #cfa4f7; }
+        }
+        :root[data-theme="dark"] { --t-azul: #9aa5ff; --t-teal: #54d6de; --t-naranja: #ffa066; --t-verde: #63db96; --t-morado: #cfa4f7; }
+        :root {
+            --cat-alimentacion: var(--g);
+            --cat-restauracion: var(--o);
+            --cat-transporte: var(--t-azul);
+            --cat-ocio: var(--t-morado);
+            --cat-ropa: color-mix(in srgb, var(--r) 55%, var(--t-morado));
+            --cat-hogar: color-mix(in srgb, var(--o) 50%, var(--g));
+            --cat-electronica: var(--t-teal);
+            --cat-salud: var(--r);
+            --cat-suscripciones: color-mix(in srgb, var(--t-azul) 50%, var(--t-morado));
+            --cat-bizum: color-mix(in srgb, var(--t-naranja) 55%, var(--r));
+            --cat-transferencia: color-mix(in srgb, var(--t-morado) 40%, var(--texto-2));
+            --cat-comisiones: color-mix(in srgb, var(--r) 40%, var(--texto-2));
+            --cat-ingresos: var(--t-verde);
+            --cat-otros: color-mix(in srgb, var(--texto-2) 75%, transparent);
+            --cat-otras: color-mix(in srgb, var(--texto) 30%, transparent);
+            --cat-r1: color-mix(in srgb, var(--t-teal) 50%, var(--g));
+            --cat-r2: color-mix(in srgb, var(--t-azul) 45%, var(--t-teal));
+            --cat-r3: color-mix(in srgb, var(--o) 45%, var(--t-morado));
+            --cat-r4: color-mix(in srgb, var(--g) 45%, var(--t-azul));
+        }
+        .tipo-tiquet  { --tipo: #4a5ae8; }
+        .tipo-tarjeta { --tipo: #0c8f9a; }
+        .tipo-salida  { --tipo: #dc5d1e; }
+        .tipo-entrada { --tipo: #18904d; }
+        .tipo-banco   { --tipo: #8b4ccc; }
+        @media (prefers-color-scheme: dark) {
+            :root:not([data-theme="light"]) .tipo-tiquet  { --tipo: #9aa5ff; }
+            :root:not([data-theme="light"]) .tipo-tarjeta { --tipo: #54d6de; }
+            :root:not([data-theme="light"]) .tipo-salida  { --tipo: #ffa066; }
+            :root:not([data-theme="light"]) .tipo-entrada { --tipo: #63db96; }
+            :root:not([data-theme="light"]) .tipo-banco   { --tipo: #cfa4f7; }
+        }
+        :root[data-theme="dark"] .tipo-tiquet  { --tipo: #9aa5ff; }
+        :root[data-theme="dark"] .tipo-tarjeta { --tipo: #54d6de; }
+        :root[data-theme="dark"] .tipo-salida  { --tipo: #ffa066; }
+        :root[data-theme="dark"] .tipo-entrada { --tipo: #63db96; }
+        :root[data-theme="dark"] .tipo-banco   { --tipo: #cfa4f7; }
+
+        /* Una fila que se está reanalizando: la misma barra indeterminada que
+           la tarjeta de subida, para que se vea que hay algo en marcha. */
+        .fila-tiquet.reintentando { background: var(--acento-suave); }
+        .barra-fila { grid-column: 1 / -1; margin-top: .35rem; }
+
+        .marca-estado {
+            display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+            vertical-align: middle; margin-right: .45rem;
+        }
+
+        /* Lo que hay que mirar, en chips bajo el buscador: filtran la lista al
+           pulsarlos. Si no hay nada que mirar, no ocupan sitio. */
+        .chips-control { display: flex; flex-wrap: wrap; gap: .35rem; }
+        .chips-control:not(:empty) { margin-top: .5rem; }
+        .chip-control {
+            display: inline-flex; align-items: center; gap: .35rem;
+            font: inherit; font-size: .72rem; color: var(--texto-2);
+            background: var(--superficie-2); border: 1px solid transparent;
+            border-radius: 999px; padding: .2rem .6rem; cursor: pointer;
+            transition: color .15s ease, border-color .15s ease;
+        }
+        .chip-control:hover { color: var(--texto); border-color: var(--borde-fuerte); }
+        .chip-control b { font-weight: 800; font-variant-numeric: tabular-nums; color: var(--texto); }
+        .chip-control.accion { color: var(--acento); border-color: var(--acento-suave); }
+        .chip-control.activo {
+            background: var(--acento); border-color: var(--acento); color: var(--acento-texto);
+        }
+        .chip-control.activo b { color: var(--acento-texto); }
+
+        .barra { height: 5px; border-radius: 999px; background: var(--acento); opacity: .8; }
+        .barra-fondo { height: 5px; border-radius: 999px; background: var(--superficie-2); }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           DISPOSICIÓN
+           El móvil manda en el orden del DOM: escanear, cifras, historial. En
+           escritorio las áreas recolocan el historial a la izquierda sin tocar
+           ese orden.
+           ═══════════════════════════════════════════════════════════════════ */
+        .disposicion { display: grid; gap: var(--hueco); }
+        /* Las cuatro cifras, en la misma rejilla que todo lo demás. */
+        .rejilla-cifras { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--hueco); }
+        @media (min-width: 1024px) { .rejilla-cifras { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        /* En el móvil, dos por fila: la tercera ocupa la fila entera. */
+        @media (max-width: 1023px) { .rejilla-cifras > :last-child:nth-child(odd) { grid-column: 1 / -1; } }
+
+        @media (min-width: 1024px) {
+            .disposicion {
+                grid-template-columns: 23rem minmax(0, 1fr);
+                grid-template-areas:
+                    "historial cifras"
+                    "historial analisis"
+                    "historial bizum"
+                    "historial mapa";
+                /* La columna del historial (con los establecimientos debajo) es
+                   más alta que cifras + análisis + mapa. Sin esto, lo que sobra se
+                   repartía entre las tres filas y aparecían huecos entre ellas. Lo
+                   absorbe la fila del mapa, que crece hasta el final del historial. */
+                grid-template-rows: auto auto auto minmax(0, 1fr);
+                align-items: start;
+                gap: var(--hueco);
+            }
+            #columnaHistorial { grid-area: historial; position: sticky; top: 1rem; }
+            #seccionCifras    { grid-area: cifras; }
+            #seccionAnalisis  { grid-area: analisis; }
+            #seccionMapa      { grid-area: mapa; align-self: stretch; display: flex; flex-direction: column; }
+            #seccionBizum     { grid-area: bizum; }
+            #seccionMapa > .tarjeta { flex: 1 1 auto; display: flex; flex-direction: column; }
+            #seccionMapa .caja-mapa { flex: 1 1 auto; height: auto; min-height: 520px; }
+            #pestanas         { display: none; }
+        }
+
+        /* En móvil, una vista cada vez. */
+        @media (max-width: 1023px) {
+            body:not(.vista-historial):not(.vista-comercios) #columnaHistorial { display: none; }
+            /* Pestaña Comercios: la misma columna, pero solo los establecimientos. */
+            body.vista-comercios #columnaHistorial > :not(#tarjetaEst) { display: none; }
+            body.vista-comercios #tarjetaEst { margin-top: 0; }
+            body.vista-comercios .lista-est { max-height: none; }
+            body.vista-historial #tarjetaEst { display: none; }
+            body:not(.vista-analisis)  #seccionAnalisis  { display: none; }
+            body:not(.vista-mapa)      #seccionMapa      { display: none; }
+            body:not(.vista-analisis)  #seccionBizum     { display: none; }
+        }
+
+        /* El panel central: el gasto en el tiempo y, a su lado, el reparto y los
+           comercios. El objetivo es verlo todo de un vistazo, sin scroll. */
+        .panel-analisis { display: flex; flex-direction: column; }
+        /* minmax(0, 1fr) y no la columna automática: con ella, un nombre de
+           comercio largo (que no parte línea) ensanchaba todo el bloque. */
+        .analisis-cuerpo { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--hueco); flex: 1 1 auto; }
+        .analisis-vistas { display: flex; flex-direction: column; min-height: 0; }
+        .columna-lateral { display: grid; gap: var(--hueco); grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); min-height: 0; min-width: 0; }
+        .sub-bloque { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+        /* Un nombre largo se recorta con "…" en vez de ensanchar la columna. */
+        .lista-reparto > *, .lista-reparto .truncate { min-width: 0; }
+        /* Las dos listas hacen scroll dentro de su mitad: así el bloque mide lo
+           mismo en todas las vistas y cambiar de pestaña no da saltos. */
+        .sub-bloque > .lista-reparto {
+            flex: 1 1 auto; min-height: 0; max-height: 260px;
+            overflow-y: auto; overscroll-behavior: contain; padding-right: .35rem;
+        }
+        .sub-bloque + .sub-bloque { border-top: 1px solid var(--borde); padding-top: var(--hueco); }
+        @media (min-width: 1100px) {
+            .analisis-cuerpo {
+                grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); align-items: stretch;
+                height: 470px;
+            }
+            .analisis-vistas { height: 100%; }
+            .columna-lateral { border-left: 1px solid var(--borde); padding-left: var(--hueco); height: 100%; }
+            .sub-bloque > .lista-reparto { max-height: none; }
+        }
+
+        /* Cifras del periodo visible. */
+        .cifras-periodo {
+            display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: .5rem; margin-bottom: var(--hueco);
+        }
+        @media (min-width: 640px) { .cifras-periodo { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+        .cifra-periodo {
+            display: flex; flex-direction: column; gap: .1rem; min-width: 0;
+            padding: .6rem .75rem; border-radius: 10px;
+            background: var(--casilla); border: 1px solid var(--casilla-borde);
+        }
+        .etiqueta-cifra {
+            font-size: .64rem; font-weight: 800; letter-spacing: .1em;
+            text-transform: uppercase; color: var(--texto-2);
+        }
+        .cifra-periodo b { font-size: clamp(1.1rem, 1.8vw, 1.5rem); font-weight: 800; letter-spacing: -.03em; line-height: 1.1; }
+        .cifra-periodo small { font-size: .7rem; color: var(--texto-2); }
+
+        /* Altura estable para lo que se recarga: un periodo sin gasto, o una
+           recarga a medias, no puede cambiar la altura del bloque y mover la
+           pagina debajo del cursor. */
+        /* Las cuatro vistas ocupan EXACTAMENTE el mismo espacio y su contenido se
+           estira hasta llenarlo: ni franja vacía abajo ni hueco a la derecha.
+           Por eso es una altura fija y no un mínimo, y por eso cada vista es
+           `height: 100%`. */
+        .caja-vistas { position: relative; flex: 1 1 auto; min-height: 380px; }
+        /* min-height: 0 en toda la cadena, que es lo que impide que una rejilla
+           o una lista empujen hacia abajo y se salgan del bloque. */
+        .caja-vistas > div { position: absolute; inset: 0; min-height: 0; overflow: hidden; }
+        .vista-grafica { height: 100%; }
+        .lista-reparto { display: flex; flex-direction: column; gap: .7rem; min-height: 188px; }
+
+        /* REPARTO POR CATEGORÍA: donut con el total en el centro y la leyenda
+           al lado (debajo si no cabe). Cada categoría, siempre el mismo color. */
+        .reparto-donut { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .9rem 1.1rem; }
+        .donut { position: relative; flex: 0 0 auto; width: 9.5rem; height: 9.5rem; }
+        .donut svg { width: 100%; height: 100%; transform: rotate(-90deg); overflow: visible; }
+        .donut-seg { fill: none; stroke-width: 13; cursor: pointer; transition: stroke-width .15s ease, opacity .15s ease; }
+        .donut-seg:hover, .donut-seg.con-tip, .donut-seg.activo { stroke-width: 17; }
+        .donut.con-activo .donut-seg:not(.activo):not(:hover) { opacity: .45; }
+        .donut-centro {
+            position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+            pointer-events: none; text-align: center; line-height: 1.1;
+        }
+        .donut-centro b { font-size: 1.05rem; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+        .donut-centro small { font-size: .62rem; color: var(--texto-2); margin-top: .15rem; }
+        .leyenda-donut { flex: 1 1 11rem; min-width: 0; display: flex; flex-direction: column; gap: .1rem; }
+        .leyenda-fila {
+            display: grid; grid-template-columns: .65rem auto minmax(0, 1fr) auto auto; align-items: center; gap: .45rem;
+            padding: .24rem .4rem; border-radius: 7px; font-size: .78rem; cursor: pointer;
+        }
+        .leyenda-fila:hover, .leyenda-fila.activo { background: var(--casilla); }
+        .leyenda-fila .punto { width: .65rem; height: .65rem; border-radius: 3px; background: var(--c); }
+        .leyenda-fila .icono-cat { width: 15px; height: 15px; color: var(--c); }
+        .leyenda-fila .pct { color: var(--texto-2); font-size: .7rem; white-space: nowrap; text-align: right; }
+        .leyenda-fila .cifra { font-weight: 700; white-space: nowrap; }
+        .vacio-discreto { font-size: .8rem; color: var(--texto-2); padding: .35rem 0; }
+
+        #listaTickets { max-height: none; min-height: 14rem; padding-top: .35rem; padding-bottom: .35rem; }
+        @media (min-width: 1024px) {
+            #listaTickets { max-height: calc(100vh - 21rem); overflow-y: auto; }
+        }
+        /* La linea de "Cargando..." ocupa su sitio este o no: si apareciera y
+           desapareciera, la lista daria un salto en cada recarga. */
+        #estadoCarga { min-height: 1.4rem; }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           SUBIDA: ZONA DE SOLTAR Y VISTA PREVIA
+           ═══════════════════════════════════════════════════════════════════ */
+        .zona-soltar {
+            border: 1.5px dashed var(--borde-fuerte); border-radius: 12px;
+            padding: 1.1rem 1rem; text-align: center;
+            transition: border-color .18s ease, background .18s ease, transform .18s ease;
+        }
+        .zona-soltar.encima {
+            border-color: var(--acento); background: var(--acento-suave);
+            transform: scale(1.01);
+        }
+        .vista-previa {
+            display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: .9rem;
+            align-items: start;
+        }
+        @media (min-width: 640px) { .vista-previa { grid-template-columns: 132px minmax(0, 1fr); } }
+        .lienzo-previa {
+            border-radius: 10px; overflow: hidden; background: #0c0c0e;
+            border: 1px solid var(--borde-fuerte);
+            aspect-ratio: 3 / 4; display: flex; align-items: center; justify-content: center;
+        }
+        .lienzo-previa img, .lienzo-previa canvas { display: block; width: 100%; height: 100%; object-fit: contain; }
+
+        .progreso { display: block; height: 6px; border-radius: 999px; background: var(--superficie-2); overflow: hidden; }
+        .progreso > i { display: block; height: 100%; width: 0; border-radius: 999px; background: var(--acento); transition: width .25s ease; }
+        .progreso.indeterminado > i { width: 40%; animation: vaiven 1.1s ease-in-out infinite alternate; }
+        @keyframes vaiven { from { transform: translateX(-30%); } to { transform: translateX(180%); } }
+
+        .pasos { display: flex; flex-wrap: wrap; gap: .35rem .6rem; font-size: .75rem; color: var(--texto-2); }
+        .paso { display: inline-flex; align-items: center; gap: .35rem; }
+        .paso::before {
+            content: ""; width: 7px; height: 7px; border-radius: 50%;
+            background: var(--borde-fuerte); transition: background .2s ease;
+        }
+        .paso.activo { color: var(--texto); font-weight: 600; }
+        .paso.activo::before { background: var(--acento); }
+        .paso.hecho::before { background: var(--g); }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           GASTO EN EL TIEMPO
+           La escala de color (verde / naranja / rojo) la deciden percentiles de
+           mi propio gasto, no umbrales fijos. Ver la leyenda bajo cada vista.
+           ═══════════════════════════════════════════════════════════════════ */
+
+        /* Tira con arrastre y ajuste: el mes se cambia deslizando, como en la
+           referencia. Las flechas hacen lo mismo que el gesto. */
+        .tira-viewport {
+            overflow-x: auto; overflow-y: hidden;
+            scroll-snap-type: x mandatory; scrollbar-width: none;
+            -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;
+            cursor: grab;
+        }
+        .tira-viewport::-webkit-scrollbar { display: none; }
+        .tira-viewport.sin-ajuste { scroll-snap-type: none; }
+        .tira-viewport.arrastrando { cursor: grabbing; user-select: none; }
+        /* La tira y sus paneles llenan el alto del hueco: el calendario de dentro
+           reparte ese alto entre sus semanas, sin desbordar por abajo. */
+        .tira-viewport { height: 100%; min-height: 0; }
+        .tira-track { display: flex; height: 100%; min-height: 0; }
+        .tira-panel { flex: 0 0 100%; scroll-snap-align: start; height: 100%; min-height: 0; overflow: hidden; }
+
+        /* DÍA: una línea de 0 a 24 h con una marca por tiquet. */
+        /* La línea de tiempo del día, VERTICAL: ocupa todo el alto del bloque y
+           cada compra es una tarjeta a la altura de su hora. En horizontal, las
+           tarjetas no cabían y debajo quedaba un vacío enorme. */
+        .linea-dia {
+            position: relative; flex: 1 1 auto; min-height: 0;
+            overflow: hidden;
+            border-radius: 10px; background: var(--casilla);
+            /* Margen arriba y abajo: el rótulo de las 00:00 va centrado en su
+               línea y sin él salía cortado por la mitad. */
+            padding: .75rem 0;
+        }
+        /* El carril de 24 horas vive dentro y es lo que da el alto real: la
+           línea hace scroll si el día no cabe. */
+        .carril-dia { position: relative; }
+        .carril-dia::before {
+            content: ""; position: absolute; top: 0; bottom: 0; left: 46px;
+            width: 1px; background: var(--borde);
+        }
+        .vacio-dia { position: absolute; top: 40%; left: 56px; right: 8px; }
+        .reja-hora {
+            position: absolute; left: 0; right: 0; height: 1px;
+            background: var(--borde); opacity: .55;
+        }
+        .rotulo-hora {
+            position: absolute; left: 0; width: 42px; text-align: right;
+            transform: translateY(-50%);
+            font-size: .62rem; font-variant-numeric: tabular-nums; color: var(--texto-2);
+        }
+
+        /* La vista del día: la línea de tiempo ocupa todo el alto del bloque y
+           los "sin hora" se cuelgan al pie. */
+        /* :not(.hidden) es imprescindible: un selector de id gana a la clase
+           .hidden de Tailwind, y sin él la vista del día se quedaba siempre
+           visible, ocupando el bloque y empujando las otras vistas hacia abajo. */
+        #vistaDia:not(.hidden) { display: flex; flex-direction: column; min-height: 0; }
+        /* Hueco FIJO, haya o no "sin hora": así la línea del día mide siempre
+           lo mismo. Si hay más de los que caben, se hace scroll dentro. */
+        #sinHoraDia {
+            flex: 0 0 auto; height: 8.4rem; overflow-y: auto; overscroll-behavior: contain;
+            margin-top: .5rem; padding-top: .5rem;
+            border-top: 1px solid var(--borde);
+        }
+        #sinHoraDia.vacio { visibility: hidden; }
+
+        /* Una compra: tarjeta a la altura de su hora, con comercio, importe y
+           hora. Un punto de color obligaba a pasar el ratón para saber qué era. */
+        .bloque-compra {
+            position: absolute; left: 56px; right: 6px;
+            display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: center; gap: .6rem; height: 22px;
+            padding: 0 8px; border: 1px solid var(--casilla-borde);
+            border-left: 3px solid var(--o);
+            border-radius: 7px; background: var(--superficie);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, .1);
+            font: inherit; font-size: .72rem; line-height: 1.25; color: var(--texto);
+            text-align: left; cursor: pointer;
+            transition: transform .15s ease, box-shadow .15s ease;
+        }
+        .bloque-compra:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0, 0, 0, .16); }
+        .bloque-compra.g { border-left-color: var(--g); }
+        .bloque-compra.o { border-left-color: var(--o); }
+        .bloque-compra.r { border-left-color: var(--r); }
+        .bloque-compra .comercio { font-weight: 600; }
+        .bloque-compra .cifra { font-weight: 800; letter-spacing: -.01em; white-space: nowrap; }
+        .bloque-compra .hora { grid-row: 1; grid-column: 1; font-size: .64rem; color: var(--texto-2); }
+        .bloque-compra .comercio { grid-column: 2; }
+        .bloque-compra .cifra:not(.hora) { grid-column: 3; }
+
+        /* El total del día, arriba de la línea. */
+        .total-dia { display: flex; align-items: baseline; gap: .5rem; margin-bottom: .4rem; }
+        .total-dia .cifra-grande { font-size: 1.4rem; }
+        .total-dia span { font-size: .72rem; color: var(--texto-2); }
+
+        /* Los "sin hora", al pie: hora desconocida no es medianoche. */
+        .lista-dia { display: flex; flex-direction: column; }
+        .fila-dia {
+            display: grid; grid-template-columns: 3.1rem minmax(0, 1fr) auto;
+            align-items: baseline; gap: .6rem; width: 100%;
+            padding: .3rem .25rem; border: 0;
+            background: transparent; color: inherit; font: inherit; font-size: .78rem;
+            text-align: left; cursor: pointer; transition: background .15s ease;
+        }
+        .fila-dia:hover { background: var(--casilla); }
+        .hora-dia { color: var(--texto-2); font-size: .72rem; }
+        .punto-nivel {
+            display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+            margin-right: .4rem; vertical-align: middle; background: var(--borde-fuerte);
+        }
+        .punto-nivel.g { background: var(--g); }
+        .punto-nivel.o { background: var(--o); }
+        .punto-nivel.r { background: var(--r); }
+
+        /* SEMANA: una columna por día, con separador, fin de semana tintado y
+           hoy resaltado. */
+        .semana {
+            display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
+            gap: 3px; height: 100%; min-height: 0;
+        }
+        /* La MISMA superficie y el MISMO borde que las casillas del mes con
+           gasto y que las del año: antes cada vista tenía su tono. */
+        .col-dia {
+            display: flex; flex-direction: column; align-items: stretch; min-height: 0;
+            border: 1px solid var(--casilla-borde); border-radius: 9px;
+            background: var(--casilla);
+            color: inherit; font: inherit; padding: 0; cursor: pointer; overflow: hidden;
+            transition: background .15s ease, border-color .15s ease;
+        }
+        .col-dia:hover { border-color: var(--borde-fuerte); }
+        .col-dia.finde { background: var(--finde); }
+        .col-dia.finde .etiqueta-col { color: var(--finde-texto); }
+        .col-dia.hoy { box-shadow: inset 0 0 0 1.5px var(--acento); }
+        .col-dia[aria-pressed="true"] { background: var(--acento-suave); box-shadow: inset 0 0 0 1.5px var(--acento); }
+        .importe-col { font-size: .66rem; font-weight: 800; text-align: center; padding: .25rem 0 .15rem; min-height: 1.1rem; }
+        .zona-barra { flex: 1 1 auto; display: flex; align-items: flex-end; justify-content: center; padding: 0 18%; }
+        .barra-col {
+            display: block; width: 100%; min-height: 0; border-radius: 7px 7px 0 0;
+            background: var(--borde-fuerte); transition: height .25s ease;
+        }
+        .barra-col.g { background: var(--g); }
+        .barra-col.o { background: var(--o); }
+        .barra-col.r { background: var(--r); }
+        .etiqueta-col {
+            font-size: .66rem; text-align: center; color: var(--texto-2);
+            padding: .3rem 0 .1rem; border-top: 1px solid var(--borde);
+        }
+        .col-dia.hoy .etiqueta-col { color: var(--texto); font-weight: 700; }
+
+        /* MES: calendario. */
+        /* Una sola rejilla de siete columnas para las etiquetas Y las casillas:
+           así cada día cae exactamente debajo de su etiqueta. Las columnas son
+           1fr —llegan al borde derecho— y las filas se reparten la altura que
+           quede, sean cuatro semanas o seis: `grid-template-rows` lo pone el
+           JavaScript según el mes. */
+        .calendario {
+            display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
+            column-gap: 3px; row-gap: 3px; height: 100%;
+        }
+        .rotulo-semana {
+            font-size: .64rem; font-weight: 700; text-align: center;
+            letter-spacing: .04em; color: var(--texto-2); padding-bottom: .1rem;
+        }
+        .rotulo-semana.finde { color: var(--finde-texto); }
+        /* Los días NO van pintados: lo que los separa es el hueco de la rejilla,
+           como las columnas de la semana. Solo el fin de semana lleva tinte, y
+           hoy lleva el contorno completo marcado con el acento. Sin
+           aspect-ratio: con una altura acotada, atar el ancho al alto dejaba las
+           casillas estrechas y una franja vacía a la derecha. */
+        .casilla-dia {
+            position: relative; display: flex; flex-direction: column; align-items: center;
+            justify-content: center; gap: 1px; min-height: 0;
+            padding: .2rem .15rem .5rem;
+            border: 1px solid transparent; border-radius: 9px;
+            background: transparent; color: inherit;
+            font: inherit; cursor: pointer; overflow: hidden;
+            -webkit-tap-highlight-color: transparent;
+            -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+            transition: background .18s ease, border-color .18s ease;
+        }
+        /* Un día con gasto SÍ lleva superficie —la misma que el año y la
+           semana—; uno vacío se queda limpio y lo que lo separa es el hueco. */
+        .casilla-dia.con-gasto { background: var(--casilla); border-color: var(--casilla-borde); }
+        .casilla-dia:hover { background: var(--casilla); border-color: var(--borde-fuerte); }
+        .casilla-dia.finde, .casilla-dia.finde.con-gasto { background: var(--finde); }
+        .casilla-dia.finde .numero-dia { color: var(--finde-texto); }
+        .casilla-fuera { visibility: hidden; cursor: default; }
+
+        /* Lo que tiene gasto, con el color de su nivel y bien visible: fondo
+           tintado y borde del mismo color. Los tokens --g/--o/--r cambian con
+           el tema, así que cada tema tiene su versión. Va en mes, semana y año. */
+        .con-gasto.nivel-g { background: color-mix(in srgb, var(--g) 30%, transparent) !important; border-color: color-mix(in srgb, var(--g) 70%, transparent) !important; }
+        .con-gasto.nivel-o { background: color-mix(in srgb, var(--o) 32%, transparent) !important; border-color: color-mix(in srgb, var(--o) 75%, transparent) !important; }
+        .con-gasto.nivel-r { background: color-mix(in srgb, var(--r) 34%, transparent) !important; border-color: color-mix(in srgb, var(--r) 80%, transparent) !important; }
+        .con-gasto .numero-dia, .con-gasto .importe-dia, .con-gasto .importe-mes, .con-gasto .nombre-mes { color: var(--texto) !important; }
+        .casilla-dia.con-gasto.casilla-hoy, .casilla-mes.con-gasto.casilla-hoy { border-color: var(--acento) !important; box-shadow: inset 0 0 0 1.5px var(--acento); }
+        /* Hoy: el contorno de la casilla, como en la referencia. */
+        .casilla-hoy { border-color: var(--acento); box-shadow: inset 0 0 0 1px var(--acento); }
+        .casilla-dia[aria-pressed="true"] {
+            background: var(--acento); border-color: var(--acento); color: var(--acento-texto);
+        }
+        .casilla-dia[aria-pressed="true"] .numero-dia,
+        .casilla-dia[aria-pressed="true"] .cuenta-dia { color: var(--acento-texto); opacity: .8; }
+        .numero-dia {
+            display: inline-flex; align-items: center; justify-content: center;
+            min-width: 1.5em; line-height: 1.15;
+            font-size: .86rem; font-weight: 600;
+            font-variant-numeric: tabular-nums; color: var(--texto-2);
+        }
+        .casilla-dia.con-gasto .numero-dia { color: var(--texto); }
+        .casilla-dia.finde .numero-dia { color: var(--texto); }
+        .importe-dia {
+            font-size: .8rem; font-weight: 800; letter-spacing: -.02em;
+            line-height: 1.15; white-space: nowrap; font-variant-numeric: tabular-nums;
+        }
+        .importe-dia.largo { font-size: .66rem; letter-spacing: -.03em; }
+        .cuenta-dia { font-size: .62rem; color: var(--texto-2); line-height: 1.1; font-variant-numeric: tabular-nums; }
+        /* La barra de la referencia: el nivel de gasto, debajo del importe. */
+        .barra-dia {
+            position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
+            width: 46%; height: 3.5px; border-radius: 999px; background: transparent;
+            transition: width .18s ease, background .18s ease;
+        }
+        .barra-dia.g { background: var(--g); }
+        .barra-dia.o { background: var(--o); }
+        .barra-dia.r { background: var(--r); width: 58%; }
+
+        /* AÑO: doce casillas con la misma escala. */
+        /* Doce casillas que llenan el bloque: cuatro filas en móvil, tres en
+           escritorio, y ningún hueco debajo. */
+        .rejilla-anio {
+            display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-auto-rows: minmax(0, 1fr); gap: .45rem; height: 100%;
+        }
+        @media (min-width: 640px) { .rejilla-anio { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+        /* Todo el histórico: con pocos años llenan el bloque como el año; con
+           muchos, cada fila tiene un alto mínimo y el bloque hace scroll. */
+        #rejillaTodo { grid-auto-rows: minmax(6.5rem, 1fr); overflow-y: auto; overscroll-behavior: contain; padding-right: .25rem; }
+        /* La MISMA superficie que las casillas del mes y las columnas de la
+           semana: antes era vidrio con desenfoque y en oscuro se veía como un
+           azul mucho más oscuro que todo lo demás. */
+        .casilla-mes {
+            position: relative; display: flex; flex-direction: column; gap: .1rem;
+            padding: .45rem .55rem .75rem; border: 1px solid var(--casilla-borde);
+            border-radius: 9px; background: var(--casilla); color: inherit;
+            font: inherit; text-align: left; cursor: pointer; overflow: hidden;
+            transition: border-color .18s ease, transform .18s ease;
+        }
+        /* Al pasar el ratón (o mantener pulsado en el móvil, mientras se ve su
+           recuadro): la casilla sube un poco y se le marca el borde. Igual en
+           el día del mes, la columna de la semana, el mes y el año. */
+        @media (hover: hover) {
+            .casilla-mes:hover, .col-dia:hover, .casilla-dia:not(.casilla-fuera):hover {
+                border-color: var(--texto) !important; transform: translateY(-2px);
+            }
+        }
+        .casilla-mes.con-tip, .col-dia.con-tip, .casilla-dia.con-tip {
+            border-color: var(--texto) !important; transform: translateY(-2px);
+        }
+        .casilla-dia, .col-dia { transition: background .18s ease, border-color .18s ease, transform .18s ease; }
+        /* Hueco arriba para esa subida: sin él, el borde de la primera fila se
+           cortaba contra el límite del bloque. */
+        .calendario, .semana, .rejilla-anio { padding-top: 3px; }
+        /* Un mes sin gasto mantiene la forma y baja de tono. */
+        .casilla-mes.sin-gasto { opacity: .55; }
+        .casilla-mes.sin-gasto .importe-mes { color: var(--texto-2); }
+        .casilla-mes[aria-pressed="true"] { box-shadow: inset 0 0 0 1.5px var(--acento); border-color: var(--acento); }
+        .casilla-mes.casilla-hoy { border-color: var(--acento); }
+        .nombre-mes { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .09em; color: var(--texto-2); }
+        /* El importe se mide con el ANCHO DE SU CASILLA (container query), no
+           con el de la ventana: "15.570,47 €" no cabía en una casilla estrecha. */
+        .casilla-mes { container-type: inline-size; }
+        .importe-mes {
+            font-size: clamp(.9rem, 15cqi, 1.75rem); font-weight: 800; letter-spacing: -.03em;
+            line-height: 1.05; font-variant-numeric: tabular-nums; margin-top: auto;
+            white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+        }
+        .importe-mes.largo { font-size: clamp(.8rem, 13.5cqi, 1.75rem); }
+        .casilla-mes .cuenta-dia { font-size: .8rem; margin-bottom: .2rem; }
+        .barra-mes {
+            position: absolute; bottom: 6px; left: .7rem; right: .7rem;
+            height: 4px; border-radius: 999px; background: transparent;
+        }
+        .barra-mes.g { background: var(--g); }
+        .barra-mes.o { background: var(--o); }
+        .barra-mes.r { background: var(--r); }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           INFORMACIÓN AL PASAR EL RATÓN (y con pulsación larga en móvil)
+           ═══════════════════════════════════════════════════════════════════ */
+        .tip {
+            position: fixed; z-index: 1400; pointer-events: none;
+            min-width: 190px; max-width: 320px;
+            background: var(--superficie); color: var(--texto);
+            border: 1px solid var(--borde-fuerte); border-radius: 11px;
+            padding: 10px 12px; box-shadow: var(--sombra); font-size: .8rem;
+            opacity: 0; transform: translateY(4px);
+            transition: opacity .15s ease, transform .15s ease;
+        }
+        .tip.visible { opacity: 1; transform: translateY(0); }
+        /* Con lista, el recuadro se puede tocar: scroll y abrir cada tiquet. */
+        .tip.con-lista { pointer-events: auto; }
+        .tip-lista {
+            margin-top: 6px; padding-top: 4px; border-top: 1px solid var(--borde-fuerte);
+            max-height: 230px; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px;
+        }
+        .tip-item[data-tiquet], .tip-item[data-ir-lat] { cursor: pointer; border-radius: 6px; margin: 0 -4px; padding-left: 4px; padding-right: 4px; }
+        .tip-item[data-tiquet]:hover, .tip-item[data-ir-lat]:hover { background: var(--casilla); }
+        .tip-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 10px; padding: 3px 0; }
+        .tip-item + .tip-item { border-top: 1px solid var(--borde); }
+        .tip-item-nombre { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .tip-item .cifra { font-weight: 700; }
+        .tip-item-extra { grid-column: 1 / -1; font-size: .7rem; color: var(--texto-2); }
+        .tip-mas { font-size: .7rem; color: var(--texto-2); padding-top: 3px; }
+        .tip-titulo { font-weight: 800; margin-bottom: 6px; letter-spacing: -.01em; }
+        .tip-fila { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; border-top: 1px solid var(--borde); }
+        .tip-fila span:first-child { color: var(--texto-2); }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           AVISO FLOTANTE
+           ═══════════════════════════════════════════════════════════════════ */
+        .toast {
+            position: fixed; z-index: 1500; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom));
+            transform: translate(-50%, 20px); opacity: 0;
+            transition: opacity .25s ease, transform .25s ease;
+            background: var(--acento); color: var(--acento-texto);
+            padding: 10px 16px; border-radius: 10px; font-size: .85rem;
+            box-shadow: var(--sombra); max-width: calc(100vw - 32px);
+        }
+        .toast.visible { transform: translate(-50%, 0); opacity: 1; }
+
+        .escaneos-ajenos {
+            position: fixed; z-index: 1450; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom));
+            display: flex; flex-direction: column; gap: 6px; max-width: calc(100vw - 32px);
+        }
+        .escaneo-ajeno {
+            display: flex; align-items: center; gap: .6rem; padding: .55rem .7rem;
+            background: var(--superficie); color: var(--texto); font-size: .82rem;
+            border: 1px solid var(--borde-fuerte); border-radius: 11px; box-shadow: var(--sombra);
+        }
+        .escaneo-ajeno .girando {
+            width: 14px; height: 14px; border-radius: 50%; flex: none;
+            border: 2px solid var(--borde-fuerte); border-top-color: var(--texto);
+            animation: girar .8s linear infinite;
+        }
+        @keyframes girar { to { transform: rotate(360deg); } }
+        .escaneo-ajeno .punto-ok, .escaneo-ajeno .punto-error { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+        .escaneo-ajeno .punto-ok { background: var(--g); }
+        .escaneo-ajeno .punto-error { background: var(--r); }
+        .cerrar-escaneo { border: 0; background: none; color: var(--texto-2); font-size: 1.1rem; line-height: 1; cursor: pointer; padding: 0 .2rem; }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           MODALES
+           Un modal CABE SIEMPRE en la pantalla: el velo centra, el panel se
+           limita a la altura del viewport y solo el cuerpo hace scroll. La
+           unidad es dvh y no vh porque en el móvil, con el teclado abierto, vh
+           sigue valiendo lo que medía la pantalla entera.
+           ═══════════════════════════════════════════════════════════════════ */
+        .modal-velo {
+            position: fixed; inset: 0;
+            display: flex; align-items: center; justify-content: center;
+            padding: 1rem; overflow: hidden;
+            background: rgba(20, 16, 30, .38);
+            -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+        }
+        .modal-panel {
+            display: flex; flex-direction: column; width: 100%;
+            max-height: calc(100vh - 2rem); max-height: calc(100dvh - 2rem);
+            overflow: hidden;
+            background-color: var(--superficie);
+            background-image:
+                radial-gradient(120% 70% at 100% 0%, color-mix(in srgb, var(--blob-2) 45%, transparent), transparent 70%),
+                radial-gradient(110% 60% at 0% 100%, color-mix(in srgb, var(--blob-1) 40%, transparent), transparent 70%),
+                radial-gradient(90% 60% at 0% 0%, color-mix(in srgb, var(--blob-3) 32%, transparent), transparent 70%);
+            border: 1px solid var(--vidrio-linea);
+        }
+        .modal-cuerpo {
+            flex: 1 1 auto; overflow-y: auto;
+            overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+        }
+        .modal-cabecera, .modal-pie { flex: 0 0 auto; background: transparent; }
+        @media (max-width: 639px) {
+            .modal-velo  { padding: 0; }
+            .modal-panel { max-height: 100vh; max-height: 100dvh; height: 100dvh;
+                           border-radius: 0; border-width: 0; }
+        }
+        .modal-velo-corto { padding: 1rem; }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           MAPA
+           ═══════════════════════════════════════════════════════════════════ */
+        /* El mapa mide lo mismo que el bloque del lado (las dos vistas del
+           análisis), así que la rejilla no se rompe. El aviso de "sin
+           coordenadas" ocupa ese mismo hueco: el bloque no cambia de tamaño. */
+        .caja-mapa {
+            height: 520px; background: var(--superficie-2); border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+        }
+
+        /* Los comercios: un punto CSS por marcador, con los colores de la paleta. */
+        .punto-mapa {
+            border-radius: 50%; background: var(--punto); border: 2px solid var(--punto-borde);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, .3); opacity: .9; cursor: pointer;
+            transform: translateY(50%); transition: transform .15s ease;
+        }
+        .punto-mapa:hover { transform: translateY(50%) scale(1.12); }
+        /* Un grupo de comercios cercanos: el número de comercios dentro. */
+        .grupo-mapa {
+            display: flex; align-items: center; justify-content: center; transform: translateY(50%);
+            border-radius: 50%; background: var(--punto); color: #fff; font-weight: 800; font-size: .8rem;
+            border: 3px solid color-mix(in srgb, var(--punto-borde) 85%, transparent);
+            box-shadow: 0 0 0 5px color-mix(in srgb, var(--punto) 28%, transparent), 0 2px 8px rgba(0, 0, 0, .3);
+            cursor: pointer;
+        }
+        .globo-mapa .tip-lista { max-height: 200px; }
+        /* Aproximado: poco relleno y un anillo discontinuo. */
+        .punto-mapa.aproximado {
+            background: color-mix(in srgb, var(--punto) 25%, transparent);
+            outline: 1.5px dashed var(--punto); outline-offset: 2px;
+        }
+
+        /* Los globos de Google, con la superficie y el texto de la página. */
+        .gm-style .gm-style-iw-c {
+            background: var(--superficie); color: var(--texto);
+            border: 1px solid var(--borde-fuerte); border-radius: 11px !important;
+            box-shadow: var(--sombra); padding: .7rem .85rem !important;
+        }
+        .gm-style .gm-style-iw-d { overflow: auto !important; }
+        .gm-style .gm-style-iw-tc::after { background: var(--superficie); }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           MÓVIL: más margen con el borde de la pantalla y todo un punto más
+           pequeño. Bajar la base escala a la vez todo lo que va en rem.
+           ═══════════════════════════════════════════════════════════════════ */
+        @media (max-width: 639px) {
+            html { font-size: 93.75%; }
+            .capa { padding-left: 1.4rem !important; padding-right: 1.4rem !important; }
+            .tarjeta.p-4 { padding: 1.1rem !important; }
+            .tarjeta.p-3 { padding: .9rem 1rem !important; }
+            .cifra-grande { font-size: 1.35rem; }
+            .titulo-grande { font-size: 1.45rem; }
+            .titulo-seccion { font-size: .68rem; }
+            .cifra-periodo b { font-size: 1.05rem; }
+            .cifra-periodo { padding: .5rem .65rem; }
+
+            /* Cabecera: el título arriba y las acciones en su propia fila, en
+               vez de montarse encima del nombre. */
+            .cabecera { flex-wrap: wrap; row-gap: .75rem; position: relative; }
+            .cabecera-acciones { width: 100%; }
+            .cabecera-acciones #btnEscanear { flex: 1 1 auto; }
+            /* "Cerrar sesión" sube a la fila del título, a la derecha. */
+            .cabecera-acciones .boton-plano { position: absolute; top: 0; right: 0; }
+            /* La paleta queda a la izquierda: su menú se abre hacia la derecha. */
+            .menu-paleta { left: 0; right: auto; }
+
+            /* Título del periodo y sus flechas: si no caben, las flechas bajan. */
+            .cabecera-rango { flex-wrap: wrap; }
+            .cabecera-rango > .min-w-0 { flex: 1 1 12rem; }
+            .cabecera-rango #tituloRango { white-space: normal; }
+
+            /* Los selectores: legibles también sobre la parte clara del fondo. */
+            .segmento { color: var(--texto); opacity: .72; padding: 6px 10px; }
+            .segmento[aria-selected="true"] { opacity: 1; }
+            #selectorPeriodo { width: 100%; }
+            #selectorPeriodo .segmento { flex: 1 1 0; }
+
+            /* EDITOR en el móvil: foto más baja (y se puede hacer scroll
+               pasando el dedo por encima), menos márgenes y el pie en una sola
+               fila con lo que se usa: Borrar, Saltar y Guardar. Cancelar ya
+               está en la X de arriba. */
+            /* ANÁLISIS en el móvil: cada vista mide lo que necesita en vez de
+               estirarse a una caja fija. El mes, con casillas casi cuadradas. */
+            .caja-vistas { min-height: 0; }
+            .caja-vistas > div { position: relative; inset: auto; }
+            #vistaMes .tira-viewport, #vistaMes .tira-track, #vistaMes .tira-panel { height: auto; }
+            .calendario { height: auto; grid-template-rows: none !important; grid-auto-rows: auto; align-content: start; }
+            .casilla-dia { aspect-ratio: 4 / 5; padding: .15rem .1rem .45rem; }
+            .casilla-fuera { aspect-ratio: auto; }
+            #vistaSemana { height: 16rem; }
+            #vistaAnio, #vistaTodo { height: 26rem; }
+            .linea-dia { flex: none; height: 22rem; }
+            .bizum-casilla .sale, .bizum-casilla .entra, .bizum-casilla .ingreso { font-size: .6rem; }
+
+            #editorPanel .modal-cabecera { padding: .6rem .9rem; }
+            #editorPanel #editorTitulo { font-size: .95rem; }
+            #editorPanel #editorProgreso, #editorPanel #editorModelo { font-size: .68rem; line-height: 1.35; }
+            #editorPanel .modal-cuerpo > .grid { padding: .75rem .9rem; gap: .75rem; }
+            #editorHermanas { margin: .6rem .9rem 0 !important; font-size: .7rem; }
+            #editorFoto { max-height: 30vh !important; }
+            #editorPdf { max-height: 30vh !important; }
+            #controlesZoom { transform: scale(.85); transform-origin: right bottom; }
+            #editorAmpliar { min-height: 30px; padding: 0 .7rem; font-size: .75rem; }
+
+            #editorPanel .modal-pie { padding: .55rem .9rem calc(.55rem + env(safe-area-inset-bottom)); }
+            #editorPanel .modal-pie .boton { min-height: 40px; font-size: .85rem; padding: 0 .8rem; }
+            #zonaReintento { margin-bottom: .5rem !important; padding-bottom: .5rem !important; flex-wrap: nowrap !important; }
+            #zonaReintento #modoReintento { flex: 1 1 auto; min-height: 36px; font-size: .8rem; }
+            #zonaReintento #btnReintentar { min-height: 36px; font-size: .8rem; white-space: nowrap; }
+            #zonaReintento #estadoReintento:empty { display: none; }
+            .pie-acciones { flex-wrap: nowrap !important; }
+            .pie-acciones > div { flex: 1 1 auto; flex-wrap: nowrap !important; justify-content: flex-end; min-width: 0; }
+            .pie-acciones #editorCancelar { display: none; }
+            .pie-acciones #btnGuardar, .pie-acciones #btnGuardarSiguiente { flex: 1 1 auto; }
+            /* En una cola de varias fichas, "Guardar y siguiente" es el botón. */
+            .pie-acciones:has(#btnGuardarSiguiente:not(.hidden)) #btnGuardar { display: none; }
+
+            /* SUBIDA en el móvil: la miniatura pequeña a la izquierda con el
+               nombre, los datos y el progreso al lado; debajo, a todo el
+               ancho, el resultado, el modelo y los botones. Así no queda un
+               hueco bajo la foto, y el nombre deja sitio a la X de cerrar. */
+            .vista-previa { grid-template-columns: 76px minmax(0, 1fr); column-gap: .8rem; row-gap: .2rem; }
+            .vista-previa > .min-w-0 { display: contents; }
+            #previaLienzo { grid-column: 1; grid-row: 1 / span 3; align-self: start; }
+            #previaNombre { grid-column: 2; padding-right: 2.1rem; }
+            #previaDatos, #previaProgreso { grid-column: 2; }
+            #previaProgreso { margin-top: .4rem; }
+            #previaProgreso .pasos { flex-wrap: wrap; row-gap: .15rem; }
+            #previaResultado, #previaAcciones, #modoModeloAyuda { grid-column: 1 / -1; }
+            #previaAcciones { margin-top: .6rem; }
+
+            /* El selector de modelo: su propia fila y al ancho disponible. */
+            #zonaModoModelo, #zonaModoReintento { width: 100%; min-width: 0; }
+            #modoModelo, #modoReintento { flex: 1 1 auto; min-width: 0; max-width: none; width: auto; }
+            #previaAcciones .boton { flex: 1 1 auto; }
+
+            /* El importe dentro de la casilla del día, sin salirse. */
+            .importe-dia, .importe-dia.largo { font-size: .54rem; letter-spacing: -.04em; }
+            .numero-dia { font-size: .8rem; }
+        }
+        .gm-style .gm-style-iw-chr button span { background-color: var(--texto-2) !important; }
+        .globo-mapa { font: inherit; font-size: .8rem; color: var(--texto); }
+        .globo-mapa ul { margin: 0; padding: 0; list-style: none; }
+        .enlace-maps { display: inline-block; margin-top: .35rem; color: var(--acento); font-size: .75rem; }
+    </style>
+</head>
+
+<body class="vista-historial">
+
+<!-- El fondo: seis manchas difuminadas con deriva lenta, y grano encima. -->
+<div class="fondo" aria-hidden="true">
+    <i class="b1"></i><i class="b2"></i><i class="b3"></i>
+    <i class="b4"></i><i class="b5"></i><i class="b6"></i>
+</div>
+
+<div class="capa max-w-[1500px] mx-auto px-4 sm:px-6 py-4 sm:py-6">
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         CABECERA. El botón de escanear siempre a mano, arriba.
+         ══════════════════════════════════════════════════════════════════ -->
+    <header class="cabecera flex items-start justify-between gap-3 mb-4">
+        <div class="min-w-0">
+            <h1 class="titulo-seccion" style="margin: 0">Tiquets</h1>
+            <p class="text-xs mt-0.5" style="color: var(--texto-2)">
+                <span id="sesionUsuario"></span>
+            </p>
+        </div>
+
+        <div class="cabecera-acciones flex items-center gap-2 shrink-0">
+            <button id="btnSalir" class="boton boton-plano boton-sm hidden">Cerrar sesión</button>
+            <a id="enlaceSalir" href="#" class="boton boton-plano boton-sm hidden">Salir del portal</a>
+
+            <div class="relative">
+                <button id="btnPaleta" class="boton boton-icono" type="button"
+                        aria-label="Paleta de color" title="Paleta de color" aria-haspopup="menu">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         stroke-width="1.8" aria-hidden="true">
+                        <path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.9 1.2-1.8l-.4-.9c-.4-.9.2-1.8 1.2-1.8H16a5 5 0 0 0 5-5c0-4.7-4-8.5-9-8.5z"/>
+                        <circle cx="7.5" cy="11" r="1.2" fill="currentColor"/>
+                        <circle cx="10.5" cy="7" r="1.2" fill="currentColor"/>
+                        <circle cx="15" cy="7.5" r="1.2" fill="currentColor"/>
+                    </svg>
+                </button>
+                <div id="menuPaleta" class="menu-paleta hidden" role="menu">
+                    <button type="button" role="menuitemradio" data-paleta=""><i style="background: linear-gradient(135deg, #ff8b6e 50%, #0f3f86 50%)"></i>Original</button>
+                    <button type="button" role="menuitemradio" data-paleta="verde"><i style="background: linear-gradient(135deg, hsl(145 85% 65%) 50%, hsl(145 70% 25%) 50%)"></i>Verde</button>
+                    <button type="button" role="menuitemradio" data-paleta="magenta"><i style="background: linear-gradient(135deg, hsl(315 85% 65%) 50%, hsl(315 70% 25%) 50%)"></i>Magenta</button>
+                    <button type="button" role="menuitemradio" data-paleta="amarillo"><i style="background: linear-gradient(135deg, hsl(45 85% 65%) 50%, hsl(45 70% 25%) 50%)"></i>Amarillo</button>
+                    <button type="button" role="menuitemradio" data-paleta="rojo"><i style="background: linear-gradient(135deg, hsl(355 85% 65%) 50%, hsl(355 70% 25%) 50%)"></i>Rojo</button>
+                    <button type="button" role="menuitemradio" data-paleta="lima"><i style="background: linear-gradient(135deg, #8eff01 50%, #8b53fe 50%)"></i>Lima</button>
+                </div>
+            </div>
+
+            <button id="btnBanco" class="boton boton-icono" type="button"
+                    aria-label="Banco" title="Banco">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3 9.5 12 4l9 5.5"/><path d="M5 10v7M9.5 10v7M14.5 10v7M19 10v7"/><path d="M3.5 20h17"/>
+                </svg>
+            </button>
+
+            <button id="btnTema" class="boton boton-icono" type="button"
+                    aria-label="Cambiar entre claro y oscuro" title="Tema">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.8" aria-hidden="true">
+                    <circle cx="12" cy="12" r="8"/>
+                    <path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"/>
+                </svg>
+            </button>
+
+            <button id="btnEscanear" class="boton boton-acento" type="button">Escanear tiquet</button>
+        </div>
+    </header>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         SUBIDA: soltar, ver qué se va a enviar, y enviarlo
+         Un input de archivo a secas no deja comprobar NADA antes de gastar
+         una llamada a la IA: ni si el archivo es el que se cree, ni cuántas
+         páginas tiene una factura.
+         ══════════════════════════════════════════════════════════════════ -->
+    <section id="zonaSubida" class="tarjeta p-3 sm:p-4 mb-4 hidden relative">
+        <button id="btnCerrarSubida" type="button" class="cerrar-subida" aria-label="Cerrar" title="Cerrar">&times;</button>
+
+        <!-- Imágenes y PDF: las facturas casi nunca son una foto. -->
+        <input type="file" id="fileInput" accept="image/*,application/pdf,.pdf" class="hidden">
+        <input type="file" id="fileInputCamara" accept="image/*" capture="environment" class="hidden">
+
+        <!-- Paso 1: elegir. En escritorio se puede soltar encima. -->
+        <div id="zonaSoltar" class="zona-soltar">
+            <p class="text-sm font-semibold">Suelta aquí una foto o un PDF</p>
+            <p class="text-xs mt-1" style="color: var(--texto-2)">
+                o elige el archivo: imágenes y facturas en PDF, hasta 100 MB
+            </p>
+            <div class="flex flex-wrap items-center justify-center gap-2 mt-3">
+                <button id="btnElegir" class="boton" type="button">Elegir archivo</button>
+                <button id="btnCamara" class="boton sm:hidden" type="button">Cámara</button>
+            </div>
+        </div>
+
+        <!-- Paso 2: lo que se va a enviar, antes de enviarlo. -->
+        <div id="previaSubida" class="hidden">
+            <div class="vista-previa">
+                <div id="previaLienzo" class="lienzo-previa"></div>
+
+                <div class="min-w-0">
+                    <p id="previaNombre" class="font-semibold truncate"></p>
+                    <p id="previaDatos" class="text-xs mt-0.5 cifra" style="color: var(--texto-2)"></p>
+
+                    <!-- Mientras analiza: los pasos, no un texto suelto. -->
+                    <div id="previaProgreso" class="hidden mt-3">
+                        <div class="progreso"><i></i></div>
+                        <div class="pasos mt-2">
+                            <span class="paso" data-paso="subiendo">Subiendo</span>
+                            <span class="paso" data-paso="analizando">Analizando</span>
+                            <span class="paso" data-paso="guardando">Guardando</span>
+                        </div>
+                        <p id="previaDetalle" class="text-xs mt-1" style="color: var(--texto-2)"></p>
+                    </div>
+
+                    <!-- Al terminar: el resultado sobre la misma tarjeta. -->
+                    <div id="previaResultado" class="hidden mt-3"></div>
+
+                    <div id="previaAcciones" class="flex flex-wrap items-center gap-2 mt-3">
+                        <div id="zonaModoModelo" class="hidden items-center gap-2">
+                            <label for="modoModelo" class="text-xs" style="color: var(--texto-2)">Modelo</label>
+                            <select id="modoModelo" class="campo w-auto max-w-[11rem]"></select>
+                        </div>
+                        <button id="btnUpload" class="boton boton-acento" type="button">Analizar</button>
+                        <button id="btnCambiarArchivo" class="boton" type="button">Cambiar</button>
+                        <button id="btnCancelarSubida" class="boton" type="button">Cancelar</button>
+                    </div>
+                    <p id="modoModeloAyuda" class="text-xs mt-2" style="color: var(--texto-2)"></p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div id="resultBanner" class="hidden tarjeta p-3 mb-4 text-sm"></div>
+
+    <div class="disposicion">
+
+        <!-- ══════════════════════════════════════════════════════════════
+             CIFRAS DEL PERIODO
+             ══════════════════════════════════════════════════════════════ -->
+        <section id="seccionCifras">
+            <div class="rejilla-cifras">
+                <div class="tarjeta p-3">
+                    <p class="titulo-seccion">Este mes</p>
+                    <p id="kpiMes" class="cifra-grande mt-1">—</p>
+                    <p id="kpiMesVariacion" class="text-xs mt-1" style="color: var(--texto-2)"></p>
+                </div>
+                <div class="tarjeta p-3">
+                    <p class="titulo-seccion">Este año</p>
+                    <p id="kpiAnio" class="cifra-grande mt-1">—</p>
+                    <p id="kpiAnioVariacion" class="text-xs mt-1" style="color: var(--texto-2)"></p>
+                </div>
+                <div class="tarjeta p-3">
+                    <p class="titulo-seccion">Tiquets</p>
+                    <p id="kpiTiquets" class="cifra-grande mt-1">—</p>
+                    <p id="kpiTiquetsBanco" class="text-xs mt-1" style="color: var(--texto-2)">del mes en curso</p>
+                </div>
+            </div>
+
+            <!-- Aviso de monedas: nunca se suman entre sí. -->
+            <!-- Lo que no es gasto (Bizum recibidos, ingresos) y los Bizum enviados,
+                 del mes en curso. Solo con el banco conectado. -->
+            <div id="resumenBanco" class="hidden tarjeta resumen-banco mt-3"></div>
+
+            <p id="avisoMonedas" class="hidden text-xs mt-2 px-3 py-2 rounded"
+               style="color: var(--aviso); background: var(--aviso-fondo)"></p>
+        </section>
+
+        <!-- Pestañas: solo en móvil, y debajo de las cifras. El orden de la
+             pantalla pequeña es escanear, cifras del mes y luego el historial;
+             el mapa y las gráficas quedan detrás de su pestaña. -->
+        <div id="pestanas" class="lg:hidden">
+            <div class="segmentos w-full" role="tablist">
+                <button class="segmento flex-1" role="tab" data-vista="historial" aria-selected="true">Historial</button>
+                <button class="segmento flex-1" role="tab" data-vista="analisis" aria-selected="false">Análisis</button>
+                <button class="segmento flex-1" role="tab" data-vista="mapa" aria-selected="false">Mapa</button>
+                <button class="segmento flex-1" role="tab" data-vista="comercios" aria-selected="false">Comercios</button>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════════════════
+             HISTORIAL
+             ══════════════════════════════════════════════════════════════ -->
+        <aside id="columnaHistorial">
+            <div class="tarjeta p-3">
+                <div class="flex items-center justify-between gap-2 mb-2">
+                    <h2 class="titulo-seccion">Historial</h2>
+                    <span id="contadorHistorial" class="text-xs cifra" style="color: var(--texto-2)"></span>
+                </div>
+
+                <input id="fBuscar" type="search" class="campo" autocomplete="off"
+                       placeholder="Buscar comercio, persona, categoría o producto">
+
+                <!-- Qué se ve: todo junto, solo tiquets, solo banco o solo Bizum. -->
+                <div id="tipoHistorial" class="segmentos w-full mt-2" role="tablist">
+                    <button class="segmento flex-1" role="tab" data-tipo-hist="" aria-selected="true">Todo</button>
+                    <button class="segmento flex-1" role="tab" data-tipo-hist="tiquets" aria-selected="false">Tiquets</button>
+                    <button class="segmento flex-1" role="tab" data-tipo-hist="banco" aria-selected="false">Banco</button>
+                    <button class="segmento flex-1" role="tab" data-tipo-hist="bizum" aria-selected="false">Bizum</button>
+                </div>
+
+                <!-- Lo que hay que mirar, en chips que filtran la lista al
+                     pulsarlos. Va aquí, con la lista a la que filtran, y no
+                     colgando del panel: allí era una línea suelta que descuadraba
+                     la rejilla. -->
+                <div id="lineaControl" class="chips-control"></div>
+                <!-- El total de lo que se está viendo cuando hay búsqueda o filtros. -->
+                <div id="totalBusqueda" class="total-busqueda hidden"></div>
+                <!-- Reintentar en lote: progreso y resumen, aquí mismo. -->
+                <div id="zonaLote" class="hidden text-xs mt-2 px-2 py-1.5 rounded"
+                     style="background: var(--superficie-2)"></div>
+
+                <div class="flex items-center gap-2 mt-2">
+                    <select id="fOrden" class="campo flex-1 min-w-0 text-xs">
+                        <option value="fecha|desc">Fecha del tiquet, primero el reciente</option>
+                        <option value="fecha|asc">Fecha del tiquet, primero el antiguo</option>
+                        <option value="importe|desc">Importe, de mayor a menor</option>
+                        <option value="importe|asc">Importe, de menor a mayor</option>
+                        <option value="subida|desc">Fecha de subida, primero el reciente</option>
+                        <option value="subida|asc">Fecha de subida, primero el antiguo</option>
+                    </select>
+                    <!-- Limpiar a la vista: sin tener que abrir el panel. -->
+                    <button id="btnLimpiarRapido" class="boton" type="button" disabled
+                            title="Quitar todos los filtros">Limpiar</button>
+                    <button id="btnFiltros" class="boton" aria-expanded="false">Filtros</button>
+                </div>
+
+                <!-- Filtros plegables -->
+                <div id="panelFiltros" class="hidden mt-3 pt-3 space-y-2"
+                     style="border-top: 1px solid var(--borde)">
+                    <div class="grid grid-cols-2 gap-2">
+                        <label><span class="etiqueta">Desde</span>
+                            <input id="fDesde" type="date" class="campo text-xs"></label>
+                        <label><span class="etiqueta">Hasta</span>
+                            <input id="fHasta" type="date" class="campo text-xs"></label>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <label><span class="etiqueta">Importe mínimo (€)</span>
+                            <input id="fMin" type="number" step="0.01" min="0" class="campo text-xs"></label>
+                        <label><span class="etiqueta">Importe máximo (€)</span>
+                            <input id="fMax" type="number" step="0.01" min="0" class="campo text-xs"></label>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <label><span class="etiqueta">Categoría</span>
+                            <input id="fCategoriaFiltro" type="text" class="campo text-xs uppercase"
+                                   list="listaCategorias" placeholder="todas"></label>
+                        <label><span class="etiqueta">Tipo</span>
+                            <input id="fTipoFiltro" type="text" class="campo text-xs uppercase"
+                                   placeholder="todos"></label>
+                    </div>
+                    <label class="block"><span class="etiqueta">Estado</span>
+                        <select id="fEstadoFiltro" class="campo text-xs">
+                            <option value="">Todos</option>
+                            <option value="procesado">Procesado</option>
+                            <option value="incompleto">Incompleto</option>
+                            <option value="pendiente">Pendiente</option>
+                            <option value="error">Con error</option>
+                        </select>
+                    </label>
+                    <datalist id="listaCategorias"></datalist>
+                    <div class="flex justify-between items-center pt-1">
+                        <span id="resumenFiltros" class="text-xs" style="color: var(--texto-2)"></span>
+                        <button id="btnLimpiarFiltros" class="boton boton-plano boton-sm">Limpiar</button>
+                    </div>
+                </div>
+
+                <!-- Lo que deja puesto un clic en el calendario. Va aquí, con la
+                     lista, y no en la gráfica: en móvil son dos pestañas
+                     distintas y el filtro se quita donde se ve que está puesto. -->
+                <p id="filtroPeriodo" class="hidden text-xs mt-2 px-2 py-1.5 rounded"
+                   style="color: var(--acento); background: var(--acento-suave)"></p>
+            </div>
+
+            <div class="tarjeta mt-3 overflow-hidden">
+                <div id="listaTickets"></div>
+                <!-- Centinela de la carga al hacer scroll -->
+                <div id="centinelaScroll" class="h-8"></div>
+                <p id="estadoCarga" class="text-xs text-center py-2" style="color: var(--texto-2)"></p>
+            </div>
+
+            <!-- Los establecimientos guardados: corregir su dirección o su
+                 ubicación, y unir los que son el mismo. -->
+            <div id="tarjetaEst" class="tarjeta p-3 mt-3">
+                <div class="flex items-center justify-between gap-2 mb-2">
+                    <h2 class="titulo-seccion">Establecimientos</h2>
+                    <span class="flex items-center gap-2">
+                        <button id="filtroPorConfirmar" type="button" class="pastilla-aviso hidden"></button>
+                        <span id="cuentaEst" class="text-xs" style="color: var(--texto-2)"></span>
+                    </span>
+                </div>
+                <input id="buscarEst" type="search" class="campo" placeholder="Buscar establecimiento" autocomplete="off">
+                <div id="listaEst" class="lista-est mt-2"></div>
+            </div>
+        </aside>
+
+        <!-- ══════════════════════════════════════════════════════════════
+             ANÁLISIS: gasto en el tiempo, categorías y comercios
+             ══════════════════════════════════════════════════════════════ -->
+        <!-- Dos columnas en escritorio: el gasto en el tiempo a la izquierda y,
+             a su lado, el reparto y los comercios. Todo lo que hay que ver de un
+             vistazo cabe sin hacer scroll. En móvil se apila. -->
+        <!-- Un solo bloque: la vista, sus cifras, el reparto y los comercios
+             cambian juntos con el periodo, así que van juntos. -->
+        <section id="seccionAnalisis" class="tarjeta p-4 panel-analisis">
+                <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                    <h2 class="titulo-seccion">Gasto en el tiempo</h2>
+                    <div class="segmentos" id="selectorPeriodo" role="tablist">
+                        <button class="segmento" role="tab" data-periodo="dia"    aria-selected="false">Día</button>
+                        <button class="segmento" role="tab" data-periodo="semana" aria-selected="false">Semana</button>
+                        <button class="segmento" role="tab" data-periodo="mes"    aria-selected="true">Mes</button>
+                        <button class="segmento" role="tab" data-periodo="anio"   aria-selected="false">Año</button>
+                        <button class="segmento" role="tab" data-periodo="todo"   aria-selected="false">Todo</button>
+                    </div>
+                </div>
+
+                <!-- El rango que se está viendo es el título, y se recorre con
+                     los tres botones. Sin esto, cuatro vistas distintas serían
+                     cuatro fotos fijas del presente. -->
+                <div class="cabecera-rango flex items-end justify-between gap-2 mb-3">
+                    <div class="min-w-0">
+                        <p id="tituloRango" class="titulo-grande truncate">—</p>
+                        <p id="resumenRango" class="text-xs cifra truncate mt-1" style="color: var(--texto-2)"></p>
+                    </div>
+                    <div class="flex items-center gap-1 shrink-0">
+                        <button id="btnAnterior"  class="boton boton-icono" aria-label="Periodo anterior">&lsaquo;</button>
+                        <button id="btnHoy"       class="boton">Hoy</button>
+                        <button id="btnSiguiente" class="boton boton-icono" aria-label="Periodo siguiente">&rsaquo;</button>
+                    </div>
+                </div>
+
+                <!-- Las cifras de LO QUE SE ESTÁ VIENDO: cambian con la vista y
+                     con las flechas. Las de arriba de la página son las del
+                     presente; estas, las del periodo del título. -->
+                <div class="cifras-periodo">
+                    <div class="cifra-periodo"><span class="etiqueta-cifra">Gasto</span><b id="kpiGasto" class="cifra">—</b><small>&nbsp;</small></div>
+                    <div class="cifra-periodo"><span class="etiqueta-cifra">Movimientos</span><b id="kpiTiquetsPeriodo" class="cifra">—</b><small id="kpiTiquetsDetalle">&nbsp;</small></div>
+                    <div class="cifra-periodo"><span class="etiqueta-cifra">Gasto medio</span><b id="kpiMedio" class="cifra">—</b><small>&nbsp;</small></div>
+                    <div class="cifra-periodo"><span id="kpiPicoEtiqueta" class="etiqueta-cifra">Día de más gasto</span><b id="kpiPico" class="cifra">—</b><small id="kpiPicoDetalle" class="truncate">&nbsp;</small></div>
+                </div>
+
+                <div class="analisis-cuerpo">
+                <div class="analisis-vistas">
+                <!-- Las cuatro vistas, en una caja de altura estable: cambiar de
+                     periodo o recargar no puede mover la página. -->
+                <div id="cajaVistas" class="caja-vistas">
+
+                    <!-- DÍA: línea de tiempo VERTICAL con una tarjeta por compra
+                         a la altura de su hora. Horizontal dejaba un vacío
+                         enorme debajo y las tarjetas no cabían. -->
+                    <div id="vistaDia" class="hidden">
+                        <div id="totalDia" class="total-dia"></div>
+                        <div id="lineaDia" class="linea-dia"></div>
+                        <div id="sinHoraDia" class="vacio"></div>
+                    </div>
+
+                    <!-- SEMANA: de lunes a domingo, en barras del color del nivel. -->
+                    <!-- SEMANA: siete columnas, una por día. A mano y no con una
+                         librería de gráficas: hace falta separar los días, tintar
+                         el fin de semana y resaltar hoy. -->
+                    <div id="vistaSemana" class="hidden vista-grafica"
+                         aria-label="Gasto por día de la semana"></div>
+
+                    <!-- MES: calendario. Se cambia de mes deslizando (o con las
+                         flechas): tres paneles y ajuste al soltar. -->
+                    <div id="vistaMes" class="hidden">
+                        <div id="tiraMeses" class="tira-viewport">
+                            <div class="tira-track">
+                                <div class="tira-panel"><div class="calendario" data-calendario="-1"></div></div>
+                                <div class="tira-panel"><div id="calendarioMes" class="calendario" data-calendario="0"></div></div>
+                                <div class="tira-panel"><div class="calendario" data-calendario="1"></div></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- AÑO: doce casillas con la misma escala. -->
+                    <div id="vistaAnio" class="hidden">
+                        <div id="rejillaAnio" class="rejilla-anio"></div>
+                    </div>
+
+                    <!-- TODO: un año por casilla, desde el primer tiquet. -->
+                    <div id="vistaTodo" class="hidden">
+                        <div id="rejillaTodo" class="rejilla-anio"></div>
+                    </div>
+                </div>
+                </div>
+
+            <div class="columna-lateral">
+                <div class="sub-bloque">
+                    <div class="flex items-baseline justify-between gap-2 mb-3">
+                        <h2 class="titulo-seccion">Reparto por categoría</h2>
+                        <span id="rangoCategorias" class="text-xs truncate" style="color: var(--texto-2)"></span>
+                    </div>
+                    <!-- Altura mínima fija: un periodo sin gasto no encoge el
+                         bloque ni mueve lo que hay debajo. -->
+                    <div id="listaCategoriasGasto" class="lista-reparto"></div>
+                </div>
+
+                <div class="sub-bloque">
+                    <div class="flex items-baseline justify-between gap-2 mb-3">
+                        <h2 class="titulo-seccion">Dónde más gasto</h2>
+                        <span id="rangoComercios" class="text-xs truncate" style="color: var(--texto-2)"></span>
+                    </div>
+                    <div id="listaComercios" class="lista-reparto"></div>
+                </div>
+            </div>
+            </div>
+        </section>
+
+        <!-- ══════════════════════════════════════════════════════════════
+             MAPA
+             ══════════════════════════════════════════════════════════════ -->
+        <!-- BIZUM del periodo que se ve en "Gasto en el tiempo": cifras, un
+             calendario con lo que sale y lo que entra cada día, y la lista. -->
+        <section id="seccionBizum" class="tarjeta p-4 hidden">
+            <div class="flex items-center justify-between gap-3 mb-3">
+                <h2 class="titulo-seccion">Bizum e ingresos</h2>
+                <span id="bizumPeriodo" class="text-xs" style="color: var(--texto-2)"></span>
+            </div>
+            <div id="bizumCifras" class="cifras-periodo"></div>
+            <div class="bizum-cuerpo">
+                <div id="bizumCalendario" class="bizum-calendario"></div>
+                <div class="min-w-0">
+                    <p id="bizumSeleccion" class="text-xs mb-1" style="color: var(--texto-2)"></p>
+                    <div id="bizumLista" class="lista-mov bizum-lista"></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="seccionMapa">
+            <div class="tarjeta p-4">
+                <div class="flex items-center justify-between gap-3 mb-3">
+                    <h2 class="titulo-seccion">Dónde gasto</h2>
+                    <span id="leyendaMapa" class="text-xs" style="color: var(--texto-2)"></span>
+                </div>
+                <div id="mapa" class="caja-mapa rounded-lg overflow-hidden"></div>
+                <p id="vacioMapa" class="hidden text-sm text-center caja-mapa" style="color: var(--texto-2)">
+                    Ningún establecimiento tiene coordenadas todavía.
+                </p>
+            </div>
+        </section>
+    </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     EDITOR / PANTALLA DE CONFIRMACIÓN
+     Un solo componente para dos usos: corregir un tiquet suelto y confirmar
+     en cadena las varias fichas que salgan de una foto con varios tiquets.
+     ══════════════════════════════════════════════════════════════════════ -->
+<div id="editorOverlay" class="hidden modal-velo z-[1100]"
+     role="dialog" aria-modal="true" aria-labelledby="editorTitulo">
+
+    <div id="editorPanel" class="tarjeta modal-panel sm:max-w-5xl">
+
+        <div class="modal-cabecera px-4 py-3 flex items-center justify-between gap-3"
+             style="background: var(--superficie); border-bottom: 1px solid var(--borde)">
+            <div class="min-w-0">
+                <button type="button" class="ficha-volver hidden"></button>
+                <div><span id="editorTipo" class="ficha-tipo tipo-tiquet"></span></div>
+                <h3 class="font-semibold" id="editorTitulo">Revisar tiquet</h3>
+                <p class="text-xs" id="editorProgreso" style="color: var(--texto-2)"></p>
+                <p class="text-xs" id="editorModelo" style="color: var(--texto-2)"></p>
+            </div>
+            <button id="editorCerrar" class="boton boton-plano text-xl leading-none px-2"
+                    title="Cerrar sin guardar" aria-label="Cerrar">&times;</button>
+        </div>
+
+      <div class="modal-cuerpo">
+
+        <div id="editorAviso" class="hidden mx-4 mt-4 p-3 rounded text-sm"></div>
+
+        <!-- De qué foto salió esta ficha. Esto NO está en la lista a propósito:
+             allí estorba, y aquí es justo lo que hace falta para no dejarse a
+             medias los tiquets de una misma foto. -->
+        <p id="editorHermanas" class="hidden mx-4 mt-4 text-xs" style="color: var(--texto-2)"></p>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4">
+
+            <!-- FOTO. Sin ver el papel no se puede corregir nada. -->
+            <div class="order-1">
+                <div class="lg:sticky lg:top-0">
+                    <div id="editorFotoCaja" class="relative rounded-lg overflow-hidden" style="background: #0c0c0e">
+                        <!-- La foto y su marco van juntos dentro de la capa que
+                             se amplía: así el marco sigue encima del tiquet a
+                             cualquier zoom. -->
+                        <div id="editorZoom" class="editor-zoom">
+                        <img id="editorFoto" src="" alt="Foto del tiquet" draggable="false"
+                             class="block w-full max-h-[45vh] lg:max-h-[62vh] object-contain">
+                        <!-- Un PDF se pinta aquí, página a página, en vez de en el
+                             <img>. Todas las páginas, con scroll propio. -->
+                        <div id="editorPdf" class="hidden overflow-y-auto max-h-[38vh] lg:max-h-[55vh]"></div>
+                        <div id="editorRecuadro" class="hidden absolute rounded pointer-events-none"
+                             style="border: 2px solid var(--acento); box-shadow: 0 0 0 9999px rgba(0,0,0,.5)"></div>
+                        </div>
+                        <!-- Zoom dentro del editor: rueda o pellizco para ampliar,
+                             arrastrar para moverse, doble clic para acercar o volver. -->
+                        <div id="controlesZoom" class="controles-zoom">
+                            <button type="button" data-zoom="menos" aria-label="Alejar">&minus;</button>
+                            <span id="nivelZoom" class="cifra">100 %</span>
+                            <button type="button" data-zoom="mas" aria-label="Acercar">+</button>
+                            <button type="button" data-zoom="ajustar" aria-label="Ajustar" title="Ajustar">&#x2922;</button>
+                        </div>
+                    </div>
+                    <div class="flex items-center justify-between mt-2 gap-2">
+                        <button id="editorAmpliar" class="boton boton-sm">Ampliar</button>
+                        <span id="editorPosicionFoto" class="hidden text-xs" style="color: var(--texto-2)"></span>
+                        <a id="editorAbrirAparte" href="#" target="_blank"
+                           class="text-xs underline" style="color: var(--texto-2)">Abrir aparte</a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- FORMULARIO. Arriba, lo que se mira siempre: comercio, importe,
+                 fecha, categoría y ubicación. Todo lo demás, en apartados
+                 plegados para las pocas veces que hay que tocarlo a mano. -->
+            <div class="order-2 space-y-3">
+
+                <div class="esencial space-y-3">
+                    <!-- Lo principal: dónde y qué. El establecimiento es el buscador
+                         unificado (tuyos al escribir, Google al pulsar, o uno nuevo). -->
+                    <div class="grid grid-cols-1 sm:grid-cols-5 gap-3">
+                        <div class="sm:col-span-3">
+                        <span class="etiqueta">Establecimiento</span>
+                        <div class="flex gap-2">
+                        <div class="campo-con-boton con-punto flex-1 min-w-0">
+                            <span id="fEstPunto" class="punto-verif" title="No verificado por Google"></span>
+                            <input id="fEstNombre" type="text" maxlength="100" autocomplete="off"
+                                   class="campo campo-grande uppercase" placeholder="Busca uno tuyo o en Google Maps">
+                            <button id="btnListaEst" type="button" class="boton-lista" tabindex="-1"
+                                    aria-label="Ver opciones"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></button>
+                        </div>
+                        <button id="btnAbrirEstTiq" type="button" class="boton boton-icono boton-abrir-est hidden"
+                                title="Abrir la ficha del establecimiento" aria-label="Abrir la ficha del establecimiento"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg></button>
+                        </div>
+                        <p id="resumenUbicacion" class="resumen-ubicacion mt-1"></p>
+                        <p id="fEstPegarAviso" class="text-xs mt-1" style="color: var(--texto-2)"></p>
+                    </div>
+                    <div class="relative sm:col-span-2">
+                        <span class="etiqueta">Categoría</span>
+                        <div class="campo-con-boton">
+                            <input id="fCategoria" type="text" maxlength="30" autocomplete="off"
+                                   class="campo campo-grande uppercase" role="combobox" aria-controls="sugerenciasCat">
+                            <button id="btnListaCat" type="button" class="boton-lista" tabindex="-1"
+                                    aria-label="Ver todas las categorías"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></button>
+                        </div>
+                        <ul id="sugerenciasCat" class="sugerencias hidden" role="listbox"></ul>
+                    </div>
+                    </div>
+
+                    <!-- El pago del banco enlazado con este tiquet (o los candidatos). -->
+                    <details id="plTiqPago" class="plegable pago-tiquet hidden">
+                        <summary><span class="pl-titulo">Pago del banco</span><span class="pl-valor"></span></summary>
+                        <div id="tiqPago" class="plegable-cuerpo"></div>
+                    </details>
+
+                    <div class="grid grid-cols-3 gap-3">
+                        <label class="col-span-2"><span class="etiqueta">Importe<span class="ayuda" title="Vacío = el documento no lleva importe (cuenta como 0,00 €). Un 0 = el documento pone cero.">?</span></span>
+                            <input id="fTotal" type="number" step="0.01" min="0" inputmode="decimal"
+                                   placeholder="sin importe" class="campo campo-grande text-right cifra"></label>
+                        <label><span class="etiqueta">Moneda</span>
+                            <input id="fMoneda" type="text" maxlength="3" class="campo campo-grande uppercase"></label>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <label><span class="etiqueta">Fecha</span>
+                            <input id="fFecha" type="date" class="campo"></label>
+                        <label><span class="etiqueta">Hora<span class="ayuda" title="Déjala vacía si el tiquet no la imprime: no se rellena con 00:00.">?</span></span>
+                            <input id="fHora" type="time" class="campo"></label>
+                    </div>
+
+                    <!-- Compartido: el total del papel se queda; en las cuentas
+                         solo cuenta mi parte. Al marcarlo sale el reparto. -->
+                    <div id="cajaCompartido">
+                        <label class="fila-check">
+                            <input id="fCompartido" type="checkbox"> Pagado entre varios
+                        </label>
+                        <div id="zonaCompartido" class="hidden mt-2 px-1 flex flex-wrap items-center gap-2">
+                            <span class="text-sm" style="color: var(--texto-2)">Entre</span>
+                            <button id="btnMenosPersonas" type="button" class="boton boton-icono" aria-label="Una persona menos">&minus;</button>
+                            <span id="fPersonas" class="cifra font-semibold" style="min-width: 1.5em; text-align: center">2</span>
+                            <button id="btnMasPersonas" type="button" class="boton boton-icono" aria-label="Una persona más">+</button>
+                            <span class="text-sm" style="color: var(--texto-2)">personas</span>
+                            <label class="ml-auto inline-flex items-center gap-2 text-sm">
+                                <span style="color: var(--texto-2)">Mi parte</span>
+                                <input id="fMiParte" type="number" step="0.01" min="0" inputmode="decimal"
+                                       class="campo cifra text-right" style="width: 6.5rem">
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <details id="apartadoDireccion" class="plegable">
+                    <summary><span class="pl-titulo">Dirección y coordenadas</span><span class="pl-valor"></span></summary>
+                    <div class="plegable-cuerpo">
+                        <label class="block"><span class="etiqueta">Pegar dirección de Google Maps</span>
+                            <input id="fEstPegar" type="text" class="campo" autocomplete="off"
+                                   placeholder="Se reparte sola en los campos de abajo"></label>
+                        <label class="block"><span class="etiqueta">Dirección</span>
+                            <input id="fEstDireccion" type="text" maxlength="120" class="campo"></label>
+                        <div class="grid grid-cols-4 gap-3 mt-2">
+                            <label class="col-span-2"><span class="etiqueta">Ciudad</span>
+                                <input id="fEstCiudad" type="text" maxlength="60" class="campo"></label>
+                            <label><span class="etiqueta">C.P.</span>
+                                <input id="fEstCp" type="text" maxlength="12" class="campo"></label>
+                            <label><span class="etiqueta">País</span>
+                                <input id="fEstPais" type="text" maxlength="60" class="campo" placeholder="España"></label>
+                        </div>
+                        <label class="block mt-2"><span class="etiqueta">Lugar deducido (si el papel no trae dirección)</span>
+                            <input id="fEstLugarInferido" type="text" maxlength="80" class="campo"
+                                   placeholder="Montserrat, Barcelona"></label>
+                        <label class="block mt-2"><span class="etiqueta">Coordenadas</span>
+                            <input id="fEstCoordenadas" type="text" class="campo cifra"
+                                   placeholder="41.0123, 0.9876" autocomplete="off"></label>
+                        <p id="pistaCoordenadas" class="text-xs mt-1" style="color: var(--texto-2)"></p>
+                    </div>
+                </details>
+
+                <details id="grupoFechas" class="plegable">
+                    <summary><span class="pl-titulo">Más sobre la fecha</span><span class="pl-valor"></span></summary>
+                    <div class="plegable-cuerpo">
+                        <label class="flex items-start gap-2 p-2 rounded cursor-pointer"
+                               style="background: var(--superficie-2)">
+                            <input id="fSinFecha" type="checkbox" class="mt-0.5">
+                            <span class="text-xs" style="color: var(--texto-2)">
+                                <b style="color: var(--texto)">Este documento no imprime fecha.</b>
+                                <span id="pistaSinFecha" class="hidden">
+                                    El campo está vacío: márcalo si has comprobado que el papel no la lleva.
+                                </span>
+                            </span>
+                        </label>
+                        <div class="grid grid-cols-2 gap-3 mt-2">
+                            <label><span class="etiqueta">Fecha del evento</span>
+                                <input id="fFechaEvento" type="date" class="campo"></label>
+                            <label><span class="etiqueta">Hora del evento</span>
+                                <input id="fHoraEvento" type="time" class="campo"></label>
+                        </div>
+                    </div>
+                </details>
+
+                <details id="plTiqTipo" class="plegable">
+                    <summary><span class="pl-titulo">Tipo de documento y pago</span><span class="pl-valor"></span></summary>
+                    <div class="plegable-cuerpo">
+                        <div class="grid grid-cols-2 gap-3">
+                            <label><span class="etiqueta">Tipo de documento</span>
+                                <input id="fTipo" type="text" maxlength="40" class="campo uppercase"></label>
+                            <label><span class="etiqueta">Método de pago</span>
+                                <input id="fMetodoPago" type="text" maxlength="40" list="listaMetodos"
+                                       class="campo uppercase">
+                                <datalist id="listaMetodos">
+                                    <option value="EFECTIVO"></option>
+                                    <option value="TARJETA"></option>
+                                    <option value="BIZUM"></option>
+                                    <option value="TRANSFERENCIA"></option>
+                                    <option value="MIXTO"></option>
+                                    <option value="DESCONOCIDO"></option>
+                                </datalist>
+                            </label>
+                        </div>
+                    </div>
+                </details>
+
+                <details id="plTiqLineas" class="plegable">
+                    <summary><span class="pl-titulo">Líneas del tiquet</span><span class="pl-valor"></span></summary>
+                    <div class="plegable-cuerpo">
+                        <div id="listaItems" class="space-y-2"></div>
+                        <button id="btnAnadirItem" type="button" class="boton boton-sm mt-2">Añadir línea</button>
+                    </div>
+                </details>
+
+                <details id="plTiqDetalles" class="plegable">
+                    <summary><span class="pl-titulo">Detalles</span><span class="pl-valor"></span></summary>
+                    <div class="plegable-cuerpo">
+                        <div id="listaDetalles" class="space-y-2"></div>
+                        <button id="btnAnadirDetalle" type="button" class="boton boton-sm mt-2">Añadir par</button>
+                    </div>
+                </details>
+            </div>
+        </div>
+
+      </div>
+
+        <div class="modal-pie px-4 py-3"
+             style="background: var(--superficie); border-top: 1px solid var(--borde)">
+
+            <!-- Volver a analizar: solo tiene sentido en una ficha que la IA no
+                 llegó a leer (pendiente o error). Con su propio selector de
+                 modelo, porque cambiar de modelo es justo lo que puede salvarla. -->
+            <div id="zonaReintento" class="hidden flex flex-wrap items-center gap-2 mb-3 pb-3"
+                 style="border-bottom: 1px solid var(--borde)">
+                <select id="modoReintento" class="campo"></select>
+                <button id="btnReintentar" class="boton" type="button">Volver a analizar</button>
+                <span id="estadoReintento" class="text-xs" style="color: var(--texto-2)"></span>
+                <!-- La misma animación que la subida: se ve que está enviando. -->
+                <div id="progresoReintento" class="hidden w-full">
+                    <div class="progreso indeterminado"><i></i></div>
+                </div>
+            </div>
+
+            <div class="pie-acciones flex flex-wrap items-center gap-2">
+                <!-- Destructivo, y a la izquierda: lejos de Guardar. -->
+                <button id="btnBorrar" class="boton boton-peligro" type="button">Borrar</button>
+                <div class="ml-auto flex flex-wrap items-center gap-2">
+                    <button id="btnSaltar" class="boton hidden">Saltar</button>
+                    <button id="editorCancelar" class="boton">Cancelar</button>
+                    <button id="btnGuardar" class="boton boton-acento">Guardar</button>
+                    <button id="btnGuardarSiguiente" class="boton boton-acento hidden">Guardar y siguiente</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- El banco: conexión, cuentas que se leen y últimos movimientos. -->
+<div id="bancoOverlay" class="hidden modal-velo z-[1250]" role="dialog" aria-modal="true" aria-labelledby="bancoTitulo">
+    <div class="tarjeta modal-panel sm:max-w-2xl">
+        <div class="modal-cabecera px-4 pt-4 pb-2 flex items-start justify-between gap-3">
+            <div class="min-w-0">
+                <h3 id="bancoTitulo" class="titulo-grande" style="font-size: 1.4rem">Banco</h3>
+                <p id="bancoEstado" class="text-xs mt-1" style="color: var(--texto-2)"></p>
+            </div>
+            <button id="bancoCerrar" type="button" class="cerrar-subida" style="position: static" aria-label="Cerrar">&times;</button>
+        </div>
+        <div class="modal-cuerpo px-4 pb-4 space-y-4">
+            <div class="flex flex-wrap gap-2">
+                <button id="bancoConectar" type="button" class="boton boton-acento hidden">Conectar con el banco</button>
+                <button id="bancoSincronizar" type="button" class="boton hidden">Sincronizar ahora</button>
+                <!-- Extracto descargado de la banca online (Excel), para tener más
+                     historia que los 89 días de la conexión. -->
+                <button id="bancoImportar" type="button" class="boton hidden">Importar extracto</button>
+                <input id="bancoFichero" type="file" accept=".xls,.xlsx,.csv,.pdf,application/pdf" class="hidden">
+                <!-- Un extracto en PDF pasado a Excel, para guardarlo o revisarlo. Se
+                     lee en el navegador: el PDF no sale de aquí. -->
+                <button id="bancoConvertir" type="button" class="boton">Convertir PDF a Excel</button>
+                <input id="bancoFicheroPdf" type="file" accept=".pdf,application/pdf" class="hidden">
+            </div>
+            <!-- Cuándo se descargó por última vez, cuándo toca la siguiente y si el
+                 banco ha puesto límite. -->
+            <div id="bancoSync" class="banco-sync hidden">
+            </div>
+            <p id="bancoAviso" class="hidden text-sm"></p>
+
+            <div id="bancoCuentasBloque" class="hidden">
+                <span class="etiqueta">Cuentas que se leen</span>
+                <div id="bancoCuentas" class="space-y-2 mt-1"></div>
+            </div>
+
+            <div id="bancoMovBloque" class="hidden">
+                <div class="segmentos w-full" id="bancoPestanas" role="tablist">
+                    <button class="segmento flex-1" role="tab" data-banco-vista="mov" aria-selected="true">Movimientos</button>
+                    <button class="segmento flex-1" role="tab" data-banco-vista="sus" aria-selected="false">Suscripciones</button>
+                </div>
+                <div id="bancoVistaMov" class="mt-3">
+                    <div id="bancoFiltros" class="flex flex-wrap gap-1.5 mb-2">
+                        <button type="button" class="chip-filtro" data-filtro="" aria-pressed="true">Todos</button>
+                        <button type="button" class="chip-filtro" data-filtro="sin_tiquet" aria-pressed="false">Sin tiquet</button>
+                        <button type="button" class="chip-filtro" data-filtro="con_tiquet" aria-pressed="false">Con tiquet</button>
+                        <button type="button" class="chip-filtro" data-filtro="bizum" aria-pressed="false">Bizum</button>
+                        <button type="button" class="chip-filtro" data-filtro="ingresos" aria-pressed="false">Ingresos</button>
+                    </div>
+                    <div id="bancoMovimientos" class="lista-mov"></div>
+                </div>
+                <!-- SUSCRIPCIONES: las detectadas por el ritmo de los cargos y las
+                     que añado yo. Confirmar, descartar, corregir y añadir. -->
+                <div id="bancoVistaSus" class="mt-3 hidden">
+                    <div class="flex items-center justify-between gap-3 mb-2 flex-wrap">
+                        <span id="susResumen" class="text-sm" style="color: var(--texto-2)"></span>
+                        <button id="susAnadir" type="button" class="boton boton-sm">+ Añadir</button>
+                    </div>
+                    <div id="susLista" class="sus-lista"></div>
+                    <details id="susDescartadasCaja" class="sus-descartadas hidden">
+                        <summary id="susDescartadasTitulo"></summary>
+                        <div id="susDescartadas"></div>
+                    </details>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Una suscripción: añadir o corregir. -->
+<div id="susOverlay" class="hidden modal-velo z-[1270]" role="dialog" aria-modal="true" aria-labelledby="susTitulo">
+    <div class="tarjeta modal-panel sm:max-w-md">
+        <div class="modal-cabecera px-5 pt-5 pb-3 flex items-start justify-between gap-3">
+            <div class="min-w-0">
+                <button type="button" class="ficha-volver hidden"></button>
+                <div><span id="susTipo" class="ficha-tipo tipo-sus"></span></div>
+                <h3 id="susTitulo" class="titulo-grande" style="font-size: 1.4rem">Suscripción</h3>
+            </div>
+            <button id="susCerrar" type="button" class="cerrar-subida" style="position: static" aria-label="Cerrar">&times;</button>
+        </div>
+        <div class="modal-cuerpo px-5 pb-5 space-y-3">
+            <label class="block"><span class="etiqueta">Nombre</span>
+                <input id="susNombre" type="text" maxlength="80" class="campo" placeholder="Netflix, gimnasio, seguro…"></label>
+            <div class="grid grid-cols-2 gap-3">
+                <label class="block"><span class="etiqueta">Importe (€)</span>
+                    <input id="susImporte" type="number" step="0.01" min="0" inputmode="decimal" class="campo cifra"></label>
+                <label class="block"><span class="etiqueta">Cada</span>
+                    <select id="susRitmo" class="campo">
+                        <option value="mensual">Mes</option>
+                        <option value="trimestral">3 meses</option>
+                        <option value="anual">Año</option>
+                    </select></label>
+            </div>
+            <label class="block"><span class="etiqueta">Próximo cargo</span>
+                <input id="susProximo" type="date" class="campo"></label>
+            <p id="susError" class="hidden text-sm" style="color: var(--error)"></p>
+        </div>
+        <div class="modal-pie px-5 py-3 flex justify-end gap-2" style="border-top: 1px solid var(--borde)">
+            <button id="susCancelar" type="button" class="boton">Cancelar</button>
+            <button id="susGuardar" type="button" class="boton boton-acento">Guardar</button>
+        </div>
+    </div>
+</div>
+
+<!-- Ficha de un movimiento del banco: tipo, categoría, si cuenta, si es
+     compartido y su tiquet. Los cambios se aplican al pulsar Guardar. -->
+<div id="movOverlay" class="hidden modal-velo z-[1260]" role="dialog" aria-modal="true" aria-labelledby="movTitulo">
+    <div class="tarjeta modal-panel sm:max-w-xl">
+        <div class="modal-cabecera px-5 pt-5 pb-3 flex items-start justify-between gap-3">
+            <div class="min-w-0">
+                <button type="button" class="ficha-volver hidden"></button>
+                <div><span id="movTipoChip" class="ficha-tipo"></span></div>
+                <h3 id="movTitulo" class="titulo-grande truncate" style="font-size: 1.45rem"></h3>
+                <p id="movSubtitulo" class="text-xs mt-1" style="color: var(--texto-2)"></p>
+            </div>
+            <button id="movCerrar" type="button" class="cerrar-subida" style="position: static" aria-label="Cerrar">&times;</button>
+        </div>
+        <div class="modal-cuerpo px-5 pb-5 space-y-3">
+            <div class="ficha-resumen">
+                <p id="movImporte" class="cifra-grande"></p>
+                <p id="movConcepto" class="mov-concepto-completo"></p>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div><span class="etiqueta">Tipo</span>
+                    <select id="movTipo" class="campo"></select>
+                </div>
+                <div>
+                    <span class="etiqueta">Categoría<span id="movCategoriaAyuda" class="ayuda" title="">?</span></span>
+                    <div class="campo-con-boton">
+                        <input id="movCategoria" type="text" maxlength="30" autocomplete="off" class="campo uppercase"
+                               role="combobox" aria-controls="movCategoriaLista" placeholder="Elige o escribe">
+                        <button id="movCategoriaBoton" type="button" class="boton-lista" tabindex="-1"
+                                aria-label="Ver todas las categorías"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></button>
+                        <ul id="movCategoriaLista" class="sugerencias hidden" role="listbox"></ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Establecimiento del comercio: verlo, cambiarlo o ir a su ficha. Lo que
+                 afecta al establecimiento entero (online, Google, unir) está en su ficha. -->
+            <div id="plMovEst">
+                <span class="etiqueta">Establecimiento<span class="ayuda" title="Cambiarlo aquí solo cambia este pago, salvo que marques que sea para todos los de este comercio. Vacíalo para que vuelva a ser el de su comercio.">?</span></span>
+                <div class="flex gap-2">
+                    <div class="campo-con-boton con-punto flex-1 min-w-0">
+                        <span id="movEstPunto" class="punto-verif" title="No verificado por Google"></span>
+                        <input id="movEstablecimiento" type="text" maxlength="100" autocomplete="off" class="campo campo-grande uppercase"
+                               placeholder="Busca uno tuyo o en Google Maps">
+                        <button id="movEstBoton" type="button" class="boton-lista" tabindex="-1" aria-label="Ver opciones"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></button>
+                    </div>
+                    <button id="movAbrirEst" type="button" class="boton boton-icono boton-abrir-est hidden"
+                            title="Abrir la ficha del establecimiento" aria-label="Abrir la ficha del establecimiento"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg></button>
+                </div>
+                <p id="movEstInfo" class="resumen-ubicacion mt-1"></p>
+                <label id="movEstTodosCaja" class="fila-check hidden mt-2">
+                    <input id="movEstTodos" type="checkbox"> <span id="movEstTodosTexto"></span>
+                </label>
+            </div>
+
+            <details id="plMovTiquet" class="plegable pago-tiquet">
+                <summary><span class="pl-titulo">Tiquet</span><span class="pl-valor"></span></summary>
+                <div id="movTiquetCaja" class="plegable-cuerpo">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span id="movTiquetEstado" class="text-sm"></span>
+                        <button id="movBuscarTiquet" type="button" class="boton boton-sm">Buscar su tiquet</button>
+                    </div>
+                    <div id="movCandidatos" class="candidatos-mov"></div>
+                </div>
+            </details>
+
+            <!-- Compartido: al marcarlo sale el reparto. -->
+            <div id="plMovCompartido">
+                <label class="fila-check">
+                    <input id="movCompartido" type="checkbox"> Pagado entre varios
+                </label>
+                <div id="movZonaCompartido" class="hidden mt-2 px-1 flex flex-wrap items-center gap-2">
+                    <span class="text-sm" style="color: var(--texto-2)">Entre</span>
+                    <button id="movMenosPersonas" type="button" class="boton boton-icono" aria-label="Una persona menos">&minus;</button>
+                    <span id="movPersonas" class="cifra font-semibold" style="min-width: 1.5em; text-align: center">2</span>
+                    <button id="movMasPersonas" type="button" class="boton boton-icono" aria-label="Una persona más">+</button>
+                    <span class="text-sm" style="color: var(--texto-2)">personas</span>
+                    <label class="ml-auto inline-flex items-center gap-2 text-sm">
+                        <span style="color: var(--texto-2)">Mi parte</span>
+                        <input id="movMiParte" type="number" step="0.01" min="0" inputmode="decimal"
+                               class="campo cifra text-right" style="width: 6.5rem">
+                    </label>
+                </div>
+            </div>
+
+            <label id="movContarCaja" class="fila-check">
+                <input id="movContar" type="checkbox">
+                <span>Cuenta como gasto<span class="ayuda" title="Desmárcalo si es un traspaso entre tus cuentas o dinero a una inversión.">?</span></span>
+            </label>
+
+            <details id="plMovDetalles" class="plegable">
+                <summary><span class="pl-titulo">Detalles del banco</span><span class="pl-valor"></span></summary>
+                <div class="plegable-cuerpo">
+                    <dl id="movDetalles" class="mov-detalles"></dl>
+                </div>
+            </details>
+
+            <div class="flex flex-wrap gap-2">
+                <button id="movSuscripcion" type="button" class="boton boton-sm hidden">Es una suscripción…</button>
+            </div>
+            <p id="movError" class="hidden text-sm" style="color: var(--error)"></p>
+        </div>
+        <div class="modal-pie px-5 py-3 flex justify-end gap-2" style="border-top: 1px solid var(--borde)">
+            <button id="movCancelar" type="button" class="boton">Cancelar</button>
+            <button id="movGuardar" type="button" class="boton boton-acento">Guardar</button>
+        </div>
+    </div>
+</div>
+
+<!-- Comensales: restaurantes de cierto importe sin decir cuántos éramos. Se
+     abre sola al entrar si hay alguno y desde su aviso en la línea de control. -->
+<div id="comOverlay" class="hidden modal-velo z-[1250]" role="dialog" aria-modal="true" aria-labelledby="comTitulo">
+    <div class="tarjeta modal-panel sm:max-w-lg">
+        <div class="modal-cabecera px-5 pt-5 pb-3 flex items-start justify-between gap-3">
+            <div class="min-w-0">
+                <h3 id="comTitulo" class="titulo-grande" style="font-size: 1.45rem">¿Cuántos erais?</h3>
+                <p id="comProgreso" class="text-xs mt-1" style="color: var(--texto-2)"></p>
+            </div>
+            <button id="comCerrar" type="button" class="cerrar-subida" style="position: static" aria-label="Cerrar">&times;</button>
+        </div>
+        <div class="modal-cuerpo px-5 pb-5 space-y-4">
+            <div class="mov-cabecera">
+                <p id="comOrigen" class="text-xs" style="color: var(--texto-2)"></p>
+                <p id="comNombre" class="font-semibold text-lg" style="word-break: break-word"></p>
+                <p id="comImporte" class="cifra-grande"></p>
+            </div>
+            <div>
+                <span class="etiqueta">Comensales</span>
+                <div id="comOpciones" class="com-opciones"></div>
+            </div>
+            <label class="block"><span class="etiqueta">Mi parte (opcional, si no fue a partes iguales)</span>
+                <input id="comMiParte" type="number" step="0.01" min="0" inputmode="decimal" class="campo cifra" style="max-width: 10rem">
+            </label>
+            <p id="comResultado" class="text-sm" style="color: var(--texto-2)"></p>
+        </div>
+        <div class="modal-pie px-5 py-3 flex flex-wrap justify-between gap-2" style="border-top: 1px solid var(--borde)">
+            <button id="comMasTarde" type="button" class="boton">Más tarde</button>
+            <div class="flex gap-2">
+                <button id="comSaltar" type="button" class="boton">Saltar</button>
+                <button id="comGuardar" type="button" class="boton boton-acento" disabled>Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Ficha de un establecimiento: corregir sus datos y unir otros a él. -->
+<div id="estOverlay" class="hidden modal-velo z-[1250]" role="dialog" aria-modal="true" aria-labelledby="estTitulo">
+    <div class="tarjeta modal-panel sm:max-w-lg">
+        <div class="modal-cabecera px-5 pt-5 pb-3 flex items-start justify-between gap-3">
+            <div class="min-w-0">
+                <button type="button" class="ficha-volver hidden"></button>
+                <div><span id="estTipo" class="ficha-tipo tipo-est"></span></div>
+                <h3 id="estTitulo" class="titulo-grande truncate" style="font-size: 1.4rem"></h3>
+                <p id="estResumen" class="text-xs mt-1" style="color: var(--texto-2)"></p>
+            </div>
+            <button id="eCerrar" type="button" class="cerrar-subida" style="position: static" aria-label="Cerrar">&times;</button>
+        </div>
+        <div class="modal-cuerpo px-5 pb-5 space-y-3">
+            <!-- Solo cuando Google ha encontrado varios: elegir es lo primero. -->
+            <div id="eAvisoGoogle" class="aviso-ficha hidden">
+                <div id="eGoogleEstado" class="font-medium mb-2"></div>
+                <div id="eCandidatos" class="lista-candidatos"></div>
+                <button id="eNingunoGoogle" type="button" class="enlace-discreto mt-2">No es ninguno de estos</button>
+            </div>
+
+            <!-- Dónde está, en una línea. -->
+            <div id="eUbicacion" class="ficha-resumen text-sm"></div>
+
+            <!-- Qué sitio es: sus últimos cargos del banco y tiquets. -->
+            <div id="eActividad" class="est-actividad hidden">
+                <div class="flex items-baseline justify-between gap-2">
+                    <span class="etiqueta">Qué es</span>
+                    <span id="eActividadTotal" class="text-xs" style="color: var(--texto-2)"></span>
+                </div>
+                <div id="eActividadLista" class="est-actividad-lista"></div>
+            </div>
+
+            <label class="block"><span class="etiqueta">Nombre</span>
+                <input id="eNombre" type="text" maxlength="100" class="campo campo-grande uppercase"></label>
+
+            <!-- Un solo buscador: un sitio de Google (verificarlo) o uno de tus
+                 establecimientos (unirlo con este). -->
+            <div>
+                <span class="etiqueta">Buscar el sitio o unir con otro<span class="ayuda" title="Elige un sitio de Google para verificar este establecimiento, o uno de los tuyos para unirlos: sus tiquets y cargos pasan a este.">?</span></span>
+                <div class="campo-con-boton">
+                    <input id="eBuscar" type="text" class="campo" autocomplete="off"
+                           placeholder="Nombre del sitio o de un establecimiento tuyo">
+                    <button id="eBuscarFlecha" type="button" class="boton-lista" tabindex="-1" aria-label="Ver opciones"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></button>
+                </div>
+            </div>
+
+            <details id="plEstDireccion" class="plegable">
+                <summary><span class="pl-titulo">Dirección y coordenadas</span><span class="pl-valor"></span></summary>
+                <div class="plegable-cuerpo">
+                    <label class="block"><span class="etiqueta">Pegar dirección de Google Maps</span>
+                        <input id="ePegar" type="text" class="campo" autocomplete="off" placeholder="Se reparte sola en los campos de abajo"></label>
+                    <p id="eAviso" class="text-xs" style="color: var(--texto-2)"></p>
+                    <label class="block"><span class="etiqueta">Dirección</span>
+                        <input id="eDireccion" type="text" maxlength="120" class="campo"></label>
+                    <div class="grid grid-cols-4 gap-3">
+                        <label class="col-span-2"><span class="etiqueta">Ciudad</span>
+                            <input id="eCiudad" type="text" maxlength="60" class="campo"></label>
+                        <label><span class="etiqueta">C.P.</span>
+                            <input id="eCp" type="text" maxlength="12" class="campo"></label>
+                        <label><span class="etiqueta">País</span>
+                            <input id="ePais" type="text" maxlength="60" class="campo" placeholder="España"></label>
+                    </div>
+                    <label class="block"><span class="etiqueta">Lugar deducido</span>
+                        <input id="eLugar" type="text" maxlength="80" class="campo" placeholder="Montserrat, Barcelona"></label>
+                    <label class="block"><span class="etiqueta">Coordenadas<span class="ayuda" title="Puestas a mano no se tocan nunca. Vacíalas para volver a la ubicación automática.">?</span></span>
+                        <input id="eCoordenadas" type="text" class="campo cifra" placeholder="41.0123, 0.9876" autocomplete="off"></label>
+                </div>
+            </details>
+
+            <details id="plEstMas" class="plegable">
+                <summary><span class="pl-titulo">Más</span><span class="pl-valor"></span></summary>
+                <div class="plegable-cuerpo">
+                    <div class="flex flex-wrap gap-2">
+                        <button id="eOnline" type="button" class="boton boton-sm">Es online (sin ubicación)</button>
+                        <button id="eSuscripcion" type="button" class="boton boton-sm hidden">Es una suscripción…</button>
+                        <button id="eDesvincular" type="button" class="boton boton-sm hidden">Desvincular de Google</button>
+                    </div>
+                </div>
+            </details>
+
+            <p id="eError" class="hidden text-sm" style="color: var(--error)"></p>
+        </div>
+        <div class="modal-pie px-5 py-3 flex justify-end gap-2" style="border-top: 1px solid var(--borde)">
+            <button id="eCancelar" type="button" class="boton">Cancelar</button>
+            <button id="eGuardar" type="button" class="boton boton-acento">Guardar</button>
+        </div>
+    </div>
+</div>
+
+<!-- Diálogo propio de confirmación. El del navegador no se puede estilar, no
+     respeta los tokens y en el móvil instalado como PWA aparece con el nombre
+     del dominio: para preguntar "¿descarto los cambios?" hace más ruido que
+     ayuda. -->
+<div id="dialogoOverlay" class="hidden modal-velo modal-velo-corto z-[1300]"
+     role="dialog" aria-modal="true" aria-labelledby="dialogoTitulo">
+    <div class="modal-panel w-full max-w-sm p-4" style="border-radius: var(--radio); max-height: none">
+        <h4 id="dialogoTitulo" class="titulo-grande" style="font-size: 1.35rem"></h4>
+        <p id="dialogoCuerpo" class="text-sm mt-2" style="color: var(--texto-2)"></p>
+        <div class="flex flex-wrap gap-2 justify-end mt-4">
+            <button id="dialogoCancelar" class="boton">Cancelar</button>
+            <button id="dialogoAceptar" class="boton boton-acento">Aceptar</button>
+        </div>
+    </div>
+</div>
+
+<!-- Lupa: la foto a pantalla completa -->
+<div id="lupa" class="hidden fixed inset-0 z-[1200] flex items-center justify-center p-2"
+     style="background: rgba(8, 8, 10, .94)">
+    <div id="lupaCaja" class="lupa-caja">
+        <div id="lupaZoom" class="editor-zoom lupa-zoom">
+            <img id="lupaFoto" src="" alt="Foto ampliada" draggable="false" class="w-full h-full object-contain">
+        </div>
+    </div>
+    <div id="controlesZoomLupa" class="controles-zoom" style="right: 1rem; bottom: 1rem">
+        <button type="button" data-zoom="menos" aria-label="Alejar">&minus;</button>
+        <span id="nivelZoomLupa" class="cifra">100 %</span>
+        <button type="button" data-zoom="mas" aria-label="Acercar">+</button>
+        <button type="button" data-zoom="ajustar" aria-label="Ajustar" title="Ajustar">&#x2922;</button>
+    </div>
+    <div id="lupaPdf" class="hidden w-full max-w-3xl max-h-full overflow-y-auto"></div>
+    <button id="lupaCerrar" class="absolute top-3 right-4 text-3xl leading-none z-10"
+            style="color: #fff" aria-label="Cerrar">&times;</button>
+</div>
+
+<!-- Información del día al pasar el ratón (y con pulsación larga en móvil). -->
+<div id="tip" class="tip" hidden></div>
+<!-- El recuadro al pasar el ratón por el mapa: propio y no un globo de Google,
+     para poder abrirlo hacia abajo cuando arriba no cabe. -->
+<div id="tipMapa" class="tip con-lista" hidden></div>
+
+<!-- Avisos que no interrumpen: lo que se ha guardado, borrado o reintentado. -->
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<!-- Escaneos lanzados desde otro dispositivo (o antes de recargar la página). -->
+<div id="escaneosAjenos" class="escaneos-ajenos hidden" role="status" aria-live="polite"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
