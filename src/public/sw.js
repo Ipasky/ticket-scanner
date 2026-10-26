@@ -27,7 +27,7 @@
 // Subir la versión invalida la caché entera en el siguiente arranque. Es la
 // única forma fiable de desplegar un cambio de armazón sin que alguien se quede
 // con la página vieja.
-const VERSION = 'v3';
+const VERSION = 'v4';
 const CACHE_ARMAZON = `ticket-scanner-armazon-${VERSION}`;
 
 // El armazón. Ni una ruta de datos: si alguna se colara aquí, se precargaría en
@@ -38,6 +38,7 @@ const ARMAZON = [
     '/login.html',
     '/sin-identidad.html',
     '/app.js',
+    '/i18n.js',
     '/pwa.js',
     '/manifest.webmanifest',
     '/icono.svg',

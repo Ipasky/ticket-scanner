@@ -140,7 +140,25 @@ const tiquetSchema = {
                 '"GRATIS" o "TOTAL: 0,00". ' +
                 'Nunca devuelvas 0 para decir "no lo he encontrado": eso convierte un ' +
                 'documento sin importe en un gasto de 0 EUR. Si no hay importe ' +
-                'impreso en el documento, devuelve null.'
+                'impreso en el documento, devuelve null. ' +
+                'Pagos en efectivo: el total es el de la compra (TOTAL), NUNCA el ' +
+                'dinero entregado (ENTREGADO, EFECTIVO, LLIURAMENT, ENTREGAT) ni el ' +
+                'cambio (CAMBIO, DEVOLUCIÓN, DEVOLUCIÓ, CANVI, A DEVOLVER).'
+        },
+        efectivo_entregado_centimos: {
+            type: Type.INTEGER,
+            nullable: true,
+            description:
+                'Solo en pagos en efectivo: el dinero que se entregó, en céntimos ' +
+                '(líneas ENTREGADO, EFECTIVO, LLIURAMENT EFECTIU, ENTREGAT). ' +
+                'null si no aparece.'
+        },
+        cambio_centimos: {
+            type: Type.INTEGER,
+            nullable: true,
+            description:
+                'Solo en pagos en efectivo: el cambio devuelto, en céntimos (líneas ' +
+                'CAMBIO, DEVOLUCIÓN, DEVOLUCIÓ, CANVI, A DEVOLVER). null si no aparece.'
         },
         moneda: {
             type: Type.STRING,
@@ -322,6 +340,14 @@ documento.
        gratuita o invitación con "0,00 EUR", "GRATIS" o "TOTAL: 0,00".
    - Nunca uses 0 como forma de decir "no lo encuentro". Si no hay importe
      impreso, total_centimos es null.
+   - PAGO EN EFECTIVO: el tiquet suele traer tres cifras seguidas: el TOTAL de
+     la compra, el dinero ENTREGADO (EFECTIVO, LLIURAMENT EFECTIU, ENTREGAT) y
+     el CAMBIO devuelto (DEVOLUCIÓN, DEVOLUCIÓ, CANVI). total_centimos es SIEMPRE
+     el TOTAL de la compra, nunca el entregado ni el cambio. Pon el entregado en
+     efectivo_entregado_centimos y el cambio en cambio_centimos.
+     Comprobación: TOTAL + CAMBIO = ENTREGADO.
+     Ejemplo: TOTAL 11,10 · LLIURAMENT EFECTIU 50,00 · DEVOLUCIÓ 38,90 →
+     total_centimos 1110, efectivo_entregado_centimos 5000, cambio_centimos 3890.
 
 4. ESTABLECIMIENTO
    - nombre_establecimiento en MAYÚSCULAS, nombre comercial, sin razón social

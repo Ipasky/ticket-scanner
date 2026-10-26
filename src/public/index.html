@@ -21,6 +21,8 @@
             if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
         } catch (e) {}
     </script>
+    <!-- Idioma: la capa de traducción va antes que nada (cambia también las fechas). -->
+    <script src="/i18n.js"></script>
     <link rel="apple-touch-icon" href="/iconos/apple-touch-icon-180.png">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="Tiquets">
@@ -619,6 +621,7 @@
         .select-bonito-boton { text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .select-bonito .boton-lista { pointer-events: none; }
         .select-bonito-boton:disabled { opacity: .55; cursor: default; }
+        #btnIdioma.boton-idioma { font: 800 .62rem/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; letter-spacing: .06em; }
         .candidatos-mov:empty { display: none; }
         /* ═══ FICHAS: el mismo esqueleto para tiquet, movimiento, establecimiento
            y suscripción. Arriba, "← volver" (si se llegó desde otra ficha) y la
@@ -767,6 +770,119 @@
             font-size: 1.35rem; line-height: 1; cursor: pointer;
         }
         .cerrar-subida:hover { background: var(--casilla); color: var(--texto); }
+
+        /* SOBRIO: papel y tinta, casi sin color, con letra con serifa (al estilo
+           de un documento de LaTeX). Sin manchas ni grano en el fondo; los
+           niveles del calendario y el donut, en grises con un matiz apagado. */
+        :root[data-paleta="sobrio"][data-theme="light"] {
+                --fondo: #faf9f6;
+                --blob-1: #faf9f6; --blob-2: #faf9f6; --blob-3: #faf9f6; --blob-4: #faf9f6; --blob-5: #faf9f6; --blob-6: #faf9f6;
+                --blob-opacidad: 0; --grano-opacidad: 0;
+                --vidrio: #ffffff; --vidrio-linea: rgba(0, 0, 0, .10);
+                --superficie: #ffffff; --superficie-2: rgba(0, 0, 0, .05);
+                --borde: rgba(0, 0, 0, .13); --borde-fuerte: rgba(0, 0, 0, .30);
+                --texto: #000000; --texto-2: #4a4a4a;
+                --acento: #000000; --acento-texto: #ffffff; --acento-suave: rgba(0, 0, 0, .08);
+                --finde: rgba(0, 0, 0, .045); --finde-texto: #333333;
+                --casilla: rgba(0, 0, 0, .022); --casilla-borde: rgba(0, 0, 0, .15);
+                --punto: #000000; --punto-borde: #ffffff;
+                --sombra: 0 1px 2px rgba(0, 0, 0, .06);
+                --g: hsl(145 55% 33%); --o: hsl(40 85% 42%); --r: hsl(0 68% 44%);
+                --peligro: hsl(0 65% 42%); --error: hsl(0 70% 40%); --aviso: hsl(38 85% 36%); --correcto: hsl(145 55% 30%);
+                --t-azul: #4f5866; --t-teal: #5a6663; --t-naranja: #75655a; --t-verde: #56645b; --t-morado: #625b68;
+                --c-sale: hsl(0 65% 42%); --c-ingreso: hsl(145 55% 32%);
+                --cat-alimentacion: #000000; --cat-restauracion: #6b6b6b; --cat-transporte: #9a9a9a; --cat-ocio: #464646;
+                --cat-ropa: #828282; --cat-hogar: #b4b4b4; --cat-electronica: #575757; --cat-salud: #8c7e78;
+                --cat-suscripciones: #747d86; --cat-bizum: #3a3a3a; --cat-transferencia: #a5a5a5; --cat-comisiones: #7a7a7a;
+                --cat-ingresos: #5f6b64; --cat-otros: #c4c4c4; --cat-otras: #d6d6d6;
+                --cat-r1: #616870; --cat-r2: #8a8a8a; --cat-r3: #4d4d4d; --cat-r4: #a39a95;
+                --radio: 8px; --radio-control: 5px;
+        }
+        @media (prefers-color-scheme: light) {
+            :root[data-paleta="sobrio"]:not([data-theme="dark"]) {
+                --fondo: #faf9f6;
+                --blob-1: #faf9f6; --blob-2: #faf9f6; --blob-3: #faf9f6; --blob-4: #faf9f6; --blob-5: #faf9f6; --blob-6: #faf9f6;
+                --blob-opacidad: 0; --grano-opacidad: 0;
+                --vidrio: #ffffff; --vidrio-linea: rgba(0, 0, 0, .10);
+                --superficie: #ffffff; --superficie-2: rgba(0, 0, 0, .05);
+                --borde: rgba(0, 0, 0, .13); --borde-fuerte: rgba(0, 0, 0, .30);
+                --texto: #000000; --texto-2: #4a4a4a;
+                --acento: #000000; --acento-texto: #ffffff; --acento-suave: rgba(0, 0, 0, .08);
+                --finde: rgba(0, 0, 0, .045); --finde-texto: #333333;
+                --casilla: rgba(0, 0, 0, .022); --casilla-borde: rgba(0, 0, 0, .15);
+                --punto: #000000; --punto-borde: #ffffff;
+                --sombra: 0 1px 2px rgba(0, 0, 0, .06);
+                --g: hsl(145 55% 33%); --o: hsl(40 85% 42%); --r: hsl(0 68% 44%);
+                --peligro: hsl(0 65% 42%); --error: hsl(0 70% 40%); --aviso: hsl(38 85% 36%); --correcto: hsl(145 55% 30%);
+                --t-azul: #4f5866; --t-teal: #5a6663; --t-naranja: #75655a; --t-verde: #56645b; --t-morado: #625b68;
+                --c-sale: hsl(0 65% 42%); --c-ingreso: hsl(145 55% 32%);
+                --cat-alimentacion: #000000; --cat-restauracion: #6b6b6b; --cat-transporte: #9a9a9a; --cat-ocio: #464646;
+                --cat-ropa: #828282; --cat-hogar: #b4b4b4; --cat-electronica: #575757; --cat-salud: #8c7e78;
+                --cat-suscripciones: #747d86; --cat-bizum: #3a3a3a; --cat-transferencia: #a5a5a5; --cat-comisiones: #7a7a7a;
+                --cat-ingresos: #5f6b64; --cat-otros: #c4c4c4; --cat-otras: #d6d6d6;
+                --cat-r1: #616870; --cat-r2: #8a8a8a; --cat-r3: #4d4d4d; --cat-r4: #a39a95;
+                --radio: 8px; --radio-control: 5px;
+            }
+        }
+        :root[data-paleta="sobrio"][data-theme="dark"] {
+                --fondo: #151515;
+                --blob-1: #151515; --blob-2: #151515; --blob-3: #151515; --blob-4: #151515; --blob-5: #151515; --blob-6: #151515;
+                --blob-opacidad: 0; --grano-opacidad: 0;
+                --vidrio: #1c1c1c; --vidrio-linea: rgba(255, 255, 255, .10);
+                --superficie: #1d1d1d; --superficie-2: rgba(255, 255, 255, .06);
+                --borde: rgba(255, 255, 255, .12); --borde-fuerte: rgba(255, 255, 255, .28);
+                --texto: #ffffff; --texto-2: #b4b4b0;
+                --acento: #ffffff; --acento-texto: #000000; --acento-suave: rgba(255, 255, 255, .10);
+                --finde: rgba(255, 255, 255, .05); --finde-texto: #cfcfcb;
+                --casilla: rgba(255, 255, 255, .03); --casilla-borde: rgba(255, 255, 255, .14);
+                --punto: #ffffff; --punto-borde: #151515;
+                --sombra: 0 1px 2px rgba(0, 0, 0, .5);
+                --g: hsl(145 50% 58%); --o: hsl(42 85% 60%); --r: hsl(0 72% 64%);
+                --peligro: hsl(0 70% 64%); --error: hsl(0 75% 68%); --aviso: hsl(42 85% 62%); --correcto: hsl(145 50% 62%);
+                --t-azul: #a4adba; --t-teal: #a6b3af; --t-naranja: #c0b0a4; --t-verde: #a7b5ac; --t-morado: #b3abb9;
+                --c-sale: hsl(0 70% 66%); --c-ingreso: hsl(145 50% 62%);
+                --cat-alimentacion: #ffffff; --cat-restauracion: #a6a6a2; --cat-transporte: #727270; --cat-ocio: #cbcbc7;
+                --cat-ropa: #8c8c89; --cat-hogar: #5f5f5d; --cat-electronica: #b8b8b4; --cat-salud: #ab9d97;
+                --cat-suscripciones: #959ea7; --cat-bizum: #d6d6d2; --cat-transferencia: #6b6b69; --cat-comisiones: #808080;
+                --cat-ingresos: #a2aea7; --cat-otros: #545452; --cat-otras: #404040;
+                --cat-r1: #9aa1a9; --cat-r2: #7c7c7a; --cat-r3: #c2c2be; --cat-r4: #a79e99;
+                --radio: 8px; --radio-control: 5px;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root[data-paleta="sobrio"]:not([data-theme="light"]) {
+                --fondo: #151515;
+                --blob-1: #151515; --blob-2: #151515; --blob-3: #151515; --blob-4: #151515; --blob-5: #151515; --blob-6: #151515;
+                --blob-opacidad: 0; --grano-opacidad: 0;
+                --vidrio: #1c1c1c; --vidrio-linea: rgba(255, 255, 255, .10);
+                --superficie: #1d1d1d; --superficie-2: rgba(255, 255, 255, .06);
+                --borde: rgba(255, 255, 255, .12); --borde-fuerte: rgba(255, 255, 255, .28);
+                --texto: #ffffff; --texto-2: #b4b4b0;
+                --acento: #ffffff; --acento-texto: #000000; --acento-suave: rgba(255, 255, 255, .10);
+                --finde: rgba(255, 255, 255, .05); --finde-texto: #cfcfcb;
+                --casilla: rgba(255, 255, 255, .03); --casilla-borde: rgba(255, 255, 255, .14);
+                --punto: #ffffff; --punto-borde: #151515;
+                --sombra: 0 1px 2px rgba(0, 0, 0, .5);
+                --g: hsl(145 50% 58%); --o: hsl(42 85% 60%); --r: hsl(0 72% 64%);
+                --peligro: hsl(0 70% 64%); --error: hsl(0 75% 68%); --aviso: hsl(42 85% 62%); --correcto: hsl(145 50% 62%);
+                --t-azul: #a4adba; --t-teal: #a6b3af; --t-naranja: #c0b0a4; --t-verde: #a7b5ac; --t-morado: #b3abb9;
+                --c-sale: hsl(0 70% 66%); --c-ingreso: hsl(145 50% 62%);
+                --cat-alimentacion: #ffffff; --cat-restauracion: #a6a6a2; --cat-transporte: #727270; --cat-ocio: #cbcbc7;
+                --cat-ropa: #8c8c89; --cat-hogar: #5f5f5d; --cat-electronica: #b8b8b4; --cat-salud: #ab9d97;
+                --cat-suscripciones: #959ea7; --cat-bizum: #d6d6d2; --cat-transferencia: #6b6b69; --cat-comisiones: #808080;
+                --cat-ingresos: #a2aea7; --cat-otros: #545452; --cat-otras: #404040;
+                --cat-r1: #9aa1a9; --cat-r2: #7c7c7a; --cat-r3: #c2c2be; --cat-r4: #a79e99;
+                --radio: 8px; --radio-control: 5px;
+            }
+        }
+        :root[data-paleta="sobrio"] body {
+            font-family: "Latin Modern Roman", "CMU Serif", "Computer Modern Serif", "Libertinus Serif",
+                         "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Noto Serif", "Times New Roman", serif;
+            font-size: 15.5px;
+        }
+        :root[data-paleta="sobrio"] .titulo-grande,
+        :root[data-paleta="sobrio"] .cifra-grande { font-weight: 700; letter-spacing: -.01em; }
+        :root[data-paleta="sobrio"] .titulo-seccion { letter-spacing: .14em; font-weight: 600; }
+        :root[data-paleta="sobrio"] .tarjeta { backdrop-filter: none; -webkit-backdrop-filter: none; }
 
         /* LIMA: verde lima y violeta eléctrico (#8eff01, #8b53fe) sobre noche
            violeta. En oscuro el acento es el lima; en claro, el violeta (el
@@ -1174,6 +1290,8 @@
         :root[data-theme="dark"] .tipo-salida  { --tipo: #ffa066; }
         :root[data-theme="dark"] .tipo-entrada { --tipo: #63db96; }
         :root[data-theme="dark"] .tipo-banco   { --tipo: #cfa4f7; }
+        /* Sobrio: las insignias de tipo, en la tinta del texto. */
+        :root[data-paleta="sobrio"] :is(.tipo-tiquet, .tipo-tarjeta, .tipo-salida, .tipo-entrada, .tipo-banco, .tipo-est) { --tipo: var(--texto-2); }
 
         /* Una fila que se está reanalizando: la misma barra indeterminada que
            la tarjeta de subida, para que se vea que hay algo en marcha. */
@@ -1321,7 +1439,7 @@
 
         /* REPARTO POR CATEGORÍA: donut con el total en el centro y la leyenda
            al lado (debajo si no cabe). Cada categoría, siempre el mismo color. */
-        .reparto-donut { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .9rem 1.1rem; }
+        .reparto-donut { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: center; gap: .9rem 1.1rem; }
         .donut { position: relative; flex: 0 0 auto; width: 9.5rem; height: 9.5rem; }
         .donut svg { width: 100%; height: 100%; transform: rotate(-90deg); overflow: visible; }
         .donut-seg { fill: none; stroke-width: 13; cursor: pointer; transition: stroke-width .15s ease, opacity .15s ease; }
@@ -1666,6 +1784,9 @@
         /* El importe se mide con el ANCHO DE SU CASILLA (container query), no
            con el de la ventana: "15.570,47 €" no cabía en una casilla estrecha. */
         .casilla-mes { container-type: inline-size; }
+        /* Mantener pulsada una casilla (meses, años) no selecciona el número. */
+        .casilla-mes { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none;
+            -webkit-user-select: none; user-select: none; }
         .importe-mes {
             font-size: clamp(.9rem, 15cqi, 1.75rem); font-weight: 800; letter-spacing: -.03em;
             line-height: 1.05; font-variant-numeric: tabular-nums; margin-top: auto;
@@ -1973,6 +2094,7 @@
                     <button type="button" role="menuitemradio" data-paleta="amarillo"><i style="background: linear-gradient(135deg, hsl(45 85% 65%) 50%, hsl(45 70% 25%) 50%)"></i>Amarillo</button>
                     <button type="button" role="menuitemradio" data-paleta="rojo"><i style="background: linear-gradient(135deg, hsl(355 85% 65%) 50%, hsl(355 70% 25%) 50%)"></i>Rojo</button>
                     <button type="button" role="menuitemradio" data-paleta="lima"><i style="background: linear-gradient(135deg, #8eff01 50%, #8b53fe 50%)"></i>Lima</button>
+                    <button type="button" role="menuitemradio" data-paleta="sobrio"><i style="background: linear-gradient(135deg, #faf9f6 50%, #141414 50%)"></i>Sobrio</button>
                 </div>
             </div>
 
@@ -1992,6 +2114,9 @@
                     <path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"/>
                 </svg>
             </button>
+
+            <button id="btnIdioma" class="boton boton-icono boton-idioma" type="button"
+                    aria-label="Idioma" title="Idioma">ES</button>
 
             <button id="btnEscanear" class="boton boton-acento" type="button">Escanear tiquet</button>
         </div>

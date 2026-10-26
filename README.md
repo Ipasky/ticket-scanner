@@ -23,7 +23,7 @@ Take a photo of a receipt and the app extracts the shop, date, total, line items
 
 It is built for **one person** and runs on your own computer or home server. Your photos and transactions stay on your machine, in two SQLite files.
 
-> **Note:** the user interface is in Spanish. Bank statement parsing is tuned for Spanish banks (Santander in particular).
+> **Note:** the interface is in Spanish, with an English translation (ES / EN button). Bank statement parsing is tuned for Spanish banks (Santander in particular).
 
 ## Contents
 
@@ -80,7 +80,8 @@ It is built for **one person** and runs on your own computer or home server. You
 ### ✨ More
 - **Installable app** on phone and desktop (PWA).
 - **Real time across devices**: upload a receipt on your phone and it appears on your computer.
-- **Light and dark themes** with several colour palettes.
+- **Light and dark themes** with several colour palettes, from vivid to a sober, almost colourless *Sober* one inspired by LaTeX documents.
+- **Spanish or English** interface, with an ES / EN switch.
 
 ---
 
@@ -102,6 +103,12 @@ It is built for **one person** and runs on your own computer or home server. You
 </table>
 
 <sub>All names, amounts and accounts in the screenshots are made up.</sub>
+
+### Themes
+
+Light or dark, in seven palettes: Original, Green, Magenta, Yellow, Red, Lime and Sober.
+
+<img src="docs/screenshots/themes.jpg" alt="The dashboard in four palettes: Lime, Sober, Original and Green">
 
 ---
 

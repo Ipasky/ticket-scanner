@@ -275,6 +275,10 @@ function repintarPorTema() {
 }
 
 /** Un toque: al tema contrario del que se está viendo. */
+// Idioma de la interfaz (i18n.js): el botón enseña el actual y cambia al otro.
+$('btnIdioma').textContent = window.IDIOMA === 'en' ? 'EN' : 'ES';
+$('btnIdioma').addEventListener('click', () => window.cambiarIdioma(window.IDIOMA === 'en' ? 'es' : 'en'));
+
 $('btnTema').addEventListener('click', () => {
     aplicarTema(temaEfectivo() === 'dark' ? 'light' : 'dark');
 });
@@ -2902,8 +2906,9 @@ function pintarTodo(puntos, moneda) {
     const primero = puntos.length ? Math.min(...puntos.map(p => Number(p.periodo))) : actual;
     const mayor = Math.max(...puntos.map(p => p.total_centimos), 1);
 
+    // Del más antiguo (izquierda) al más reciente (derecha), como el calendario.
     const casillas = [];
-    for (let a = actual; a >= primero; a -= 1) {
+    for (let a = primero; a <= actual; a += 1) {
         const punto = porAnio.get(String(a));
         const r = punto ? punto.total_centimos / mayor : 0;
         const nivel = r > 0.66 ? 'r' : r > 0.33 ? 'o' : 'g';
@@ -3799,7 +3804,7 @@ function cargarGoogleMaps() {
                 'Google ha rechazado la clave del mapa: revisa GOOGLE_MAPS_API_KEY y sus restricciones.');
             const s = document.createElement('script');
             s.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(configMapa.clave) +
-                    '&v=weekly&loading=async&libraries=marker&language=es&region=ES&callback=__alCargarMapa';
+                    `&v=weekly&loading=async&libraries=marker&language=${window.IDIOMA === 'en' ? 'en' : 'es'}&region=ES&callback=__alCargarMapa`;
             s.async = true;
             s.onerror = () => mal(new Error('no carga'));
             document.head.appendChild(s);

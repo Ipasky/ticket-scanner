@@ -572,6 +572,21 @@ function validarRecuadro(valor) {
  *   afectaEstado : true si el descarte toca fecha_compra o total_centimos, los
  *                  campos que definen el estado de la fila.
  */
+/**
+ * Pago en efectivo: el tiquet trae TOTAL, ENTREGADO y CAMBIO, y la IA a veces
+ * coge el cambio (o lo entregado) como total. Si el total coincide con uno de
+ * los dos y entregado - cambio es un importe positivo, devuelve ese importe;
+ * si no hay nada que corregir, null.
+ */
+function corregirTotalEfectivo(total, entregado, cambio) {
+    const entero = (v) => Number.isInteger(v) && v >= 0 ? v : null;
+    const t = entero(total), e = entero(entregado), c = entero(cambio);
+    if (t === null || e === null || c === null) return null;
+    const bueno = e - c;
+    if (bueno <= 0 || t === bueno) return null;
+    return t === c || t === e ? bueno : null;
+}
+
 function validarDatosExtraidos(entrada) {
     const datos       = {};
     const descartados = [];
@@ -610,6 +625,18 @@ function validarDatosExtraidos(entrada) {
     if (!rTotal.ok) {
         camposNulos.add('total_centimos');
         descartados.push({ campo: 'total_centimos', motivo: rTotal.motivo, valor: recortar(rTotal.valor) });
+    }
+
+    // Pago en efectivo: si el total que ha dado la IA es el dinero entregado o el
+    // cambio, el bueno es entregado - cambio (TOTAL + CAMBIO = ENTREGADO).
+    const totalEfectivo = corregirTotalEfectivo(datos.total_centimos, bruto.efectivo_entregado_centimos, bruto.cambio_centimos);
+    if (totalEfectivo !== null) {
+        descartados.push({
+            campo: 'total_centimos',
+            motivo: 'era el dinero entregado o el cambio; se usa entregado - cambio',
+            valor: recortar(datos.total_centimos)
+        });
+        datos.total_centimos = totalEfectivo;
     }
 
     const rItems = validarItems(bruto.items);
@@ -783,6 +810,7 @@ function normalizarDatos(datos, camposNulos = new Set()) {
 module.exports = {
     // validación
     validarDatosExtraidos,
+    corregirTotalEfectivo,
     validarLoteExtraido,
     validarTexto,
     validarTotal,

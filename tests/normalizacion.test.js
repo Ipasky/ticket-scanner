@@ -757,3 +757,15 @@ test('unas coordenadas en lugar_inferido se descartan', () => {
         assert.ok(descartados.some(d => d.campo === 'lugar_inferido'), falso);
     }
 });
+
+test('efectivo: si la IA coge el cambio o lo entregado como total, el total es entregado - cambio', () => {
+    const { corregirTotalEfectivo, validarDatosExtraidos } = require('../src/services/normalizacion.js');
+    // Mercadona: TOTAL 11,10 · LLIURAMENT EFECTIU 50,00 · DEVOLUCIÓ 38,90
+    assert.equal(corregirTotalEfectivo(3890, 5000, 3890), 1110);
+    assert.equal(corregirTotalEfectivo(5000, 5000, 3890), 1110);
+    assert.equal(corregirTotalEfectivo(1110, 5000, 3890), null, 'ya estaba bien');
+    assert.equal(corregirTotalEfectivo(3890, null, 3890), null, 'sin entregado no se adivina');
+    assert.equal(corregirTotalEfectivo(null, 5000, 3890), null, 'sin total no se inventa');
+    const r = validarDatosExtraidos({ total_centimos: 3890, efectivo_entregado_centimos: 5000, cambio_centimos: 3890 });
+    assert.equal(r.datos.total_centimos, 1110);
+});
