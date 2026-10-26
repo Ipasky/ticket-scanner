@@ -13,7 +13,7 @@ matches them against your bank account in read-only mode.
 [![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8?logo=pwa&logoColor=white)](#more)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-<img src="docs/screenshots/dashboard.png" alt="ticket-scanner dashboard" width="900">
+<img src="docs/screenshots/dashboard.jpg" alt="ticket-scanner dashboard" width="900">
 
 </div>
 
@@ -88,18 +88,20 @@ It is built for **one person** and runs on your own computer or home server. You
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/screenshots/receipt.png" alt="Receipt review"><br><sub><b>Receipt review</b>: the photo next to what Gemini read, ready to correct.</sub></td>
-    <td width="50%"><img src="docs/screenshots/bank.png" alt="Bank window"><br><sub><b>Bank</b>: sync status, accounts, transactions and subscriptions.</sub></td>
+    <td width="50%"><img src="docs/screenshots/receipt.jpg" alt="Receipt review"><br><sub><b>Receipt review</b>: the photo next to what Gemini read, ready to correct.</sub></td>
+    <td width="50%"><img src="docs/screenshots/bank.jpg" alt="Bank window"><br><sub><b>Bank</b>: sync status, accounts, transactions and subscriptions.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/screenshots/transaction.png" alt="Bank transaction"><br><sub><b>Transaction</b>: type, category, place, receipt and split bill.</sub></td>
-    <td width="50%"><img src="docs/screenshots/map.png" alt="Spending map"><br><sub><b>Map</b>: where you spend, grouped by area.</sub></td>
+    <td width="50%"><img src="docs/screenshots/transaction.jpg" alt="Bank transaction"><br><sub><b>Transaction</b>: type, category, place, receipt and split bill.</sub></td>
+    <td width="50%"><img src="docs/screenshots/subscriptions.jpg" alt="Subscriptions"><br><sub><b>Subscriptions</b>: recurring charges detected from the bank, to confirm or dismiss.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/screenshots/place.png" alt="Place page"><br><sub><b>Place</b>: location, Google verification and its activity.</sub></td>
-    <td width="50%" align="center"><img src="docs/screenshots/mobile.png" alt="Mobile view" width="260"><br><sub><b>Mobile</b>: installed as an app.</sub></td>
+    <td width="50%"><img src="docs/screenshots/place.jpg" alt="Place page"><br><sub><b>Place</b>: location, Google verification and its activity.</sub></td>
+    <td width="50%" align="center"><img src="docs/screenshots/mobile.jpg" alt="Mobile view" width="260"><br><sub><b>Mobile</b>: installed as an app.</sub></td>
   </tr>
 </table>
+
+<sub>All names, amounts and accounts in the screenshots are made up.</sub>
 
 ---
 
