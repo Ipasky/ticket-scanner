@@ -43,7 +43,7 @@ const pedirCrudo = (metodo, ruta, { headers = {}, cuerpo } = {}) => {
     return fetch(ctx.base + ruta, opciones);
 };
 
-const conIdentidad = (usuario = 'isaac') => ({ [CABECERA]: usuario });
+const conIdentidad = (usuario = 'ana') => ({ [CABECERA]: usuario });
 
 // =============================================================================
 // CABECERA AUSENTE
@@ -120,7 +120,7 @@ test('cabecera presente: acceso a la API y la identidad se propaga', async () =>
     const estado = await pedirCrudo('GET', '/api/auth/estado', { headers: conIdentidad() })
         .then(r => r.json());
     assert.equal(estado.autenticado, true);
-    assert.equal(estado.usuario, 'isaac');
+    assert.equal(estado.usuario, 'ana');
     assert.equal(estado.modo, 'proxy');
     assert.equal(estado.login_disponible, false);
 });
@@ -128,14 +128,14 @@ test('cabecera presente: acceso a la API y la identidad se propaga', async () =>
 test('se leen también el correo y el nombre, para poder mostrar quién está conectado', async () => {
     const estado = await pedirCrudo('GET', '/api/auth/estado', {
         headers: {
-            ...conIdentidad('isaac'),
-            [CABECERA_EMAIL]:  'isaac@ejemplo.tld',
+            ...conIdentidad('ana'),
+            [CABECERA_EMAIL]:  'ana@ejemplo.tld',
             [CABECERA_NOMBRE]: 'Ana García'
         }
     }).then(r => r.json());
 
-    assert.equal(estado.usuario, 'isaac');
-    assert.equal(estado.email, 'isaac@ejemplo.tld');
+    assert.equal(estado.usuario, 'ana');
+    assert.equal(estado.email, 'ana@ejemplo.tld');
     assert.equal(estado.nombre, 'Ana García');
 });
 

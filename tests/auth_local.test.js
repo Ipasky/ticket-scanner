@@ -12,7 +12,7 @@ const { hashearPassword } = require('../src/services/password.js');
 const PASSWORD = 'contrasena-de-prueba-larga';
 
 process.env.AUTH_MODE           = 'local';
-process.env.AUTH_USUARIO        = 'isaac';
+process.env.AUTH_USUARIO        = 'ana';
 process.env.AUTH_PASSWORD_HASH  = hashearPassword(PASSWORD);
 process.env.SESSION_SECRET      = crypto.randomBytes(48).toString('base64url');
 process.env.AUTH_COOKIE_SECURE  = '';
@@ -132,7 +132,7 @@ test('login correcto: cookie httpOnly, sameSite estricto y acceso a la API', asy
     assert.equal(res.status, 200);
     const datos = await res.json();
     assert.equal(datos.ok, true);
-    assert.equal(datos.usuario, 'isaac');
+    assert.equal(datos.usuario, 'ana');
 
     assert.ok(cookie, 'tiene que venir una cookie de sesión');
 
@@ -231,7 +231,7 @@ test('cookie firmada con OTRO secreto no vale (cambiar SESSION_SECRET revoca tod
     // conviene que funcione de verdad.
     const ajena = (() => {
         const payload = Buffer.from(JSON.stringify({
-            u: 'isaac', iat: Date.now(), exp: Date.now() + 1000000
+            u: 'ana', iat: Date.now(), exp: Date.now() + 1000000
         })).toString('base64url');
         const firma = crypto.createHmac('sha256', 'otro-secreto-completamente-distinto')
             .update(payload).digest().toString('base64url');
@@ -245,7 +245,7 @@ test('cookie firmada con OTRO secreto no vale (cambiar SESSION_SECRET revoca tod
 test('expiración: una cookie caducada se rechaza aunque su firma sea buena', () => {
     // Se comprueba sobre las primitivas porque fabricar una cookie caducada por
     // HTTP exigiría esperar 30 días o manosear el reloj del proceso.
-    const valorValido = auth.crearValorSesion('isaac');
+    const valorValido = auth.crearValorSesion('ana');
     assert.ok(auth.leerValorSesion(valorValido), 'recién emitida, válida');
 
     // Un instante después de su caducidad: la firma sigue siendo correcta y aun
@@ -267,7 +267,7 @@ test('renovación al usarse: solo cuando la cookie ya tiene un día', async () =
     assert.equal(cookieDeSesion(reciente), null, 'no debería renovar una cookie recién emitida');
 
     // Con más de un día encima, sí. Se fabrica una con iat antiguo y firma buena.
-    const vieja = auth.crearValorSesion('isaac', Date.now() - auth.RENOVAR_PASADO_MS - 60000);
+    const vieja = auth.crearValorSesion('ana', Date.now() - auth.RENOVAR_PASADO_MS - 60000);
     const res = await pedirCrudo('GET', '/api/tickets', { cookie: `${auth.COOKIE_SESION}=${vieja}` });
 
     assert.equal(res.status, 200);

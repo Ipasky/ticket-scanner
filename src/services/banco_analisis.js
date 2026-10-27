@@ -14,7 +14,7 @@
  *   BIZUM DE|A <PERSONA> CONCEPTO <TEXTO>
  *   TRANSFERENCIA [INMEDIATA] DE|A <PERSONA>, CONCEPTO <TEXTO>
  *   LIQUIDACION DEL CONTRATO …
- * El comercio viene recortado (unos 17 caracteres): "CARREF MANRESA". Por eso
+ * El comercio viene recortado (unos 17 caracteres): "CARREF TERRASSA". Por eso
  * se compara con el mismo criterio flexible que Google Places.
  */
 
@@ -48,7 +48,7 @@ function parsearConcepto(concepto) {
     }
     // Tarjeta, forma 1: "... EN <COMERCIO>, <POBLACION> ES, TARJ. :*1234". En
     // los extractos antiguos la población viene recortada y pegada al país
-    // ("ALCALA DE HENES") o con otra coma por medio ("ROGES SUMA, PERE III,
+    // ("ALCALA DE HENES") o con otra coma por medio ("SUPER SOL, AV. DIAGONAL,
     // PASES"): el comercio es lo de antes de la primera coma y el resto, el sitio.
     if ((m = c.match(/^(?:PAGO MOVIL|COMPRA INTERNET|COMPRA|TRANSACCION CONTACTLESS|DEVOLUCION COMPRA)\s+EN\s+([^,]+),\s*(.+?),\s*TARJ/i))) {
         let poblacion = limpio(m[2]).split(',').pop().trim();

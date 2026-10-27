@@ -185,7 +185,8 @@
         'Google ha rechazado la clave del mapa: revisa GOOGLE_MAPS_API_KEY y sus restricciones.': 'Google rejected the map key: check GOOGLE_MAPS_API_KEY and its restrictions.',
         'no carga': 'not loading', 'sin compras ubicadas': 'no located purchases', 'Sin compras con ubicación en este periodo.': 'No purchases with a location in this period.',
         'Falta la clave del mapa (GOOGLE_MAPS_API_KEY en el .env).': 'The map key is missing (GOOGLE_MAPS_API_KEY in .env).', 'No se ha podido cargar Google Maps (¿sin conexión?).': 'Google Maps could not be loaded (offline?).',
-        'Abrir en Google Maps': 'Open in Google Maps',
+        'Abrir en Google Maps': 'Open in Google Maps', 'Gemini hoy': 'Gemini today', 'sin usar hoy': 'not used today', 'límite por minuto: espera un poco': 'per-minute limit: wait a moment', 'Buscar otro sitio en Google': 'Search Google for another place', 'Buscar': 'Search',
+        'Sin verificar en Google: búscalo para situarlo en el mapa.': 'Not verified on Google: search for it to put it on the map.', 'Buscar en Google Maps': 'Search on Google Maps', 'Ver en Maps': 'View on Maps',
         // Banco
         'Conectar con el banco': 'Connect to the bank', 'Sincronizar ahora': 'Sync now', 'Importar extracto': 'Import statement', 'Convertir PDF a Excel': 'Convert PDF to Excel',
         'Renovar el permiso': 'Renew consent', 'Cuentas que se leen': 'Accounts being read', 'Sin configurar: faltan la clave o el id de Enable Banking en el .env.': 'Not configured: the Enable Banking key or id is missing in .env.',
@@ -299,7 +300,13 @@
         [/^(ayer|hoy|mañana) a las (.+)$/, (_, d, h) => `${{ ayer: 'yesterday', hoy: 'today', mañana: 'tomorrow' }[d]} at ${h}`], [/^el (.+) a las (.+)$/, 'on $1 at $2'],
         [/^sin enlazar · (\d+) posibles?$/, (_, n) => `not linked · ${n} possible`], [/^Pagado entre (\d+)$/, 'Split $1 ways'],
         [/^(\d+) sin importe$/, '$1 without an amount'], [/^(.+) · sin tiquets$/, (_, r) => `${tr(r)} · no receipts`],
-        [/^tarjeta (\*+\d+)$/, 'card $1'], [/^TARJETA (\*+\d+)$/, 'CARD $1'],
+        [/^tarjeta (\*+\d+)$/, 'card $1'],
+        [/^(\d+) (?:petición|peticiones) hoy( de (\d+)\/día)?$/, (_, n, x, l) => `${n} request${n === '1' ? '' : 's'} today${l ? ` of ${l}/day` : ''}`],
+        [/^(\d+) sin cuota$/, '$1 out of quota'], [/^(\d+) saturado$/, '$1 overloaded'], [/^(\d+) peticiones$/, '$1 requests'],
+        [/^agotado hasta (.+)$/, 'exhausted until $1'], [/^saturado hace (\d+) (min|h)$/, 'overloaded $1 $2 ago'], [/^saturado ahora mismo$/, 'overloaded just now'],
+        [/^(\d+) de (\d+) agotados?$/, '$1 of $2 exhausted'],
+        [/^Contado por la app \(Google no da el uso por la API\)\. Los límites salen cuando un modelo se agota\. La cuota diaria se renueva (.+)\.$/,
+            (_, c) => `Counted by the app (Google does not expose usage through the API). Limits appear once a model runs out. The daily quota renews ${tr(c)}.`], [/^Google para «(.+)»: ¿cuál es\?$/, 'Google results for «$1»: which one is it?'], [/^Google no ha encontrado nada para «(.+)»\.$/, 'Google found nothing for «$1».'], [/^TARJETA (\*+\d+)$/, 'CARD $1'],
         [/^Uno nuevo; se buscará en el mapa solo$/, 'A new one; it will be located on the map automatically'], [/^Crear «(.+)»$/, 'Create «$1»'], [/^\+ Crear «(.+)»$/, '+ Create «$1»'],
     ];
 

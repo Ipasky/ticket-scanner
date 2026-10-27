@@ -614,6 +614,21 @@
         .banco-sync .linea span:first-child { color: var(--texto-2); }
         .banco-sync .ok { color: var(--g); font-weight: 600; }
         .banco-sync .aviso { color: var(--o); font-weight: 600; }
+        .uso-ia .plegable-cuerpo { gap: .35rem; font-size: .8rem; }
+        .ia-fila { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .1rem .75rem; padding: .3rem 0; border-top: 1px solid var(--borde); }
+        .ia-fila:first-child { border-top: 0; }
+        .ia-modelo { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ia-cifras { grid-column: 1; color: var(--texto-2); font-size: .75rem; }
+        .ia-estado { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-size: .72rem; font-weight: 700;
+            padding: .15rem .55rem; border-radius: 999px; white-space: nowrap; border: 1px solid currentColor; }
+        .ia-estado.ok { color: var(--g); } .ia-estado.agotado { color: var(--r); } .ia-estado.saturado { color: var(--o); }
+        .ia-estado.sin_uso { color: var(--texto-2); border-color: var(--borde-fuerte); }
+        .ia-nota { font-size: .72rem; color: var(--texto-2); }
+        /* Sobrio: el pago del banco enlazado, en verde (es importante verlo). */
+        :root[data-paleta="sobrio"] .pago-tiquet.enlazado { border-color: var(--g); border-width: 1.5px;
+            background: color-mix(in srgb, var(--g) 16%, var(--casilla)); }
+        :root[data-paleta="sobrio"] .pago-tiquet.enlazado > summary .pl-titulo,
+        :root[data-paleta="sobrio"] .pago-tiquet.enlazado > summary .pl-valor { color: var(--g); }
         /* Todas las casillas de verificación, con el acento del tema. */
         input[type="checkbox"] { accent-color: var(--acento); width: 17px; height: 17px; cursor: pointer; vertical-align: -3px; }
         /* Desplegable propio en lugar del <select> nativo (que el sistema pinta a
@@ -648,6 +663,18 @@
         @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tipo-est { --tipo: #f2c35b; } }
         :root[data-theme="dark"] .tipo-est { --tipo: #f2c35b; }
         .ficha-resumen { padding: .8rem 1rem; border-radius: 12px; background: var(--casilla); border: 1px solid var(--casilla-borde); }
+        /* Qué sitio es: el nombre y la dirección de Google, su estado y el botón a Maps. */
+        .est-id-nombre { font-weight: 700; font-size: 1rem; }
+        .est-id-dir { font-size: .85rem; margin-top: .15rem; }
+        .est-id-pie { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; margin-top: .65rem; }
+        .est-id-estado { display: inline-flex; align-items: center; gap: .45rem; font-size: .75rem; color: var(--texto-2); }
+        .punto-verif.en-linea { position: relative; left: auto; top: auto; transform: none; flex: none; cursor: default; }
+        /* Botón a Google Maps: bien visible, porque se usa para comprobar el sitio. */
+        .boton-maps { display: inline-flex; align-items: center; gap: .35rem; padding: .3rem .65rem; border-radius: 999px;
+            font-size: .75rem; font-weight: 600; text-decoration: none; white-space: nowrap;
+            color: var(--texto); background: var(--superficie); border: 1px solid var(--borde-fuerte); }
+        .boton-maps:hover { border-color: var(--acento); color: var(--acento); }
+        .boton-maps svg { width: 12px; height: 12px; flex: none; }
 
         .plegable { border: 1px solid var(--casilla-borde); border-radius: 12px; background: var(--casilla); }
         .plegable > summary {
@@ -697,7 +724,9 @@
             padding: .45rem .55rem .2rem; font-size: .6rem; font-weight: 800; letter-spacing: .1em;
             text-transform: uppercase; color: var(--texto-2);
         }
-        .bq-fila { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: .6rem; padding: .45rem .55rem; border-radius: 8px; cursor: pointer; }
+        .bq-fila { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; column-gap: .6rem; padding: .45rem .55rem; border-radius: 8px; cursor: pointer; }
+        .bq-fila .boton-maps { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+        .bq-fila .bq-accion { grid-column: 3; }
         .bq-fila[aria-selected="true"], .bq-fila:hover { background: var(--casilla); }
         .bq-nombre { font-weight: 600; font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .bq-donde { grid-column: 1; font-size: .72rem; color: var(--texto-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -734,6 +763,13 @@
         .bloque-google { padding: .75rem; border: 1px solid var(--borde); border-radius: 10px; background: var(--casilla); }
         .bloque-google .verificado { color: var(--g); font-weight: 600; }
         .lista-candidatos { display: flex; flex-direction: column; gap: .4rem; margin-top: .5rem; }
+        .busca-google { display: flex; gap: .5rem; margin-top: .6rem; }
+        .busca-google .campo { flex: 1; min-width: 0; }
+        .google-vacio { font-size: .8rem; color: var(--texto-2); margin-top: .5rem; }
+        /* Verificado: la ficha de identidad, con un toque del verde. */
+        .ficha-resumen.verificada { border-color: color-mix(in srgb, var(--g) 45%, transparent);
+            background: color-mix(in srgb, var(--g) 7%, var(--casilla)); }
+        .ficha-resumen.verificada .est-id-estado { color: var(--texto); font-weight: 600; }
         .lista-candidatos:empty { display: none; }
         .candidato {
             display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .15rem .6rem; align-items: center;
@@ -742,7 +778,7 @@
         .candidato .c-nombre { font-weight: 600; font-size: .85rem; }
         .candidato .c-donde { grid-column: 1; font-size: .75rem; color: var(--texto-2); }
         .candidato .c-acciones { grid-column: 2; grid-row: 1 / span 2; display: flex; flex-direction: column; gap: .25rem; align-items: flex-end; }
-        .candidato a { font-size: .7rem; color: var(--texto-2); }
+        .candidato a:not(.boton-maps) { font-size: .7rem; color: var(--texto-2); }
         .enlace-discreto { border: 0; background: none; padding: 0; font: inherit; font-size: .75rem;
                            color: var(--texto-2); text-decoration: underline; cursor: pointer; }
 
@@ -1902,6 +1938,12 @@
                            border-radius: 0; border-width: 0; }
         }
         .modal-velo-corto { padding: 1rem; }
+        /* Fichas y banco: siempre del mismo tamaño en escritorio. Lo que cambia
+           dentro (elegir un sitio, cambiar de pestaña, pasar de una ficha a otra)
+           solo cambia el contenido, que tiene su propio scroll: nada salta. */
+        @media (min-width: 640px) {
+            .ficha-fija { height: min(860px, calc(100vh - 2rem)); height: min(860px, calc(100dvh - 2rem)); }
+        }
 
         /* ═══════════════════════════════════════════════════════════════════
            MAPA
@@ -2542,8 +2584,11 @@
                         <!-- Un PDF se pinta aquí, página a página, en vez de en el
                              <img>. Todas las páginas, con scroll propio. -->
                         <div id="editorPdf" class="hidden overflow-y-auto max-h-[38vh] lg:max-h-[55vh]"></div>
+                        <!-- Fino y por FUERA del tiquet (con margen), y el resto de la foto
+                             solo un poco más oscuro: si el recuadro no es exacto, lo que
+                             queda fuera se sigue leyendo. -->
                         <div id="editorRecuadro" class="hidden absolute rounded pointer-events-none"
-                             style="border: 2px solid var(--acento); box-shadow: 0 0 0 9999px rgba(0,0,0,.5)"></div>
+                             style="outline: 1.5px solid color-mix(in srgb, var(--acento) 85%, transparent); outline-offset: 2px; box-shadow: 0 0 0 9999px rgba(0,0,0,.2)"></div>
                         </div>
                         <!-- Zoom dentro del editor: rueda o pellizco para ampliar,
                              arrastrar para moverse, doble clic para acercar o volver. -->
@@ -2765,7 +2810,7 @@
 
 <!-- El banco: conexión, cuentas que se leen y últimos movimientos. -->
 <div id="bancoOverlay" class="hidden modal-velo z-[1250]" role="dialog" aria-modal="true" aria-labelledby="bancoTitulo">
-    <div class="tarjeta modal-panel sm:max-w-2xl">
+    <div class="tarjeta modal-panel ficha-fija sm:max-w-2xl">
         <div class="modal-cabecera px-4 pt-4 pb-2 flex items-start justify-between gap-3">
             <div class="min-w-0">
                 <h3 id="bancoTitulo" class="titulo-grande" style="font-size: 1.4rem">Banco</h3>
@@ -2790,6 +2835,12 @@
                  banco ha puesto límite. -->
             <div id="bancoSync" class="banco-sync hidden">
             </div>
+            <!-- Uso de Gemini hoy, por modelo: cuántas peticiones, su límite (cuando
+                 Google lo dice al agotarse) y si está agotado o saturado. -->
+            <details id="plIA" class="plegable uso-ia">
+                <summary><span class="pl-titulo">Gemini hoy</span><span class="pl-valor"></span></summary>
+                <div id="iaUso" class="plegable-cuerpo"></div>
+            </details>
             <p id="bancoAviso" class="hidden text-sm"></p>
 
             <div id="bancoCuentasBloque" class="hidden">
@@ -2832,7 +2883,7 @@
 
 <!-- Una suscripción: añadir o corregir. -->
 <div id="susOverlay" class="hidden modal-velo z-[1270]" role="dialog" aria-modal="true" aria-labelledby="susTitulo">
-    <div class="tarjeta modal-panel sm:max-w-md">
+    <div class="tarjeta modal-panel ficha-fija sm:max-w-xl">
         <div class="modal-cabecera px-5 pt-5 pb-3 flex items-start justify-between gap-3">
             <div class="min-w-0">
                 <button type="button" class="ficha-volver hidden"></button>
@@ -2868,7 +2919,7 @@
 <!-- Ficha de un movimiento del banco: tipo, categoría, si cuenta, si es
      compartido y su tiquet. Los cambios se aplican al pulsar Guardar. -->
 <div id="movOverlay" class="hidden modal-velo z-[1260]" role="dialog" aria-modal="true" aria-labelledby="movTitulo">
-    <div class="tarjeta modal-panel sm:max-w-xl">
+    <div class="tarjeta modal-panel ficha-fija sm:max-w-xl">
         <div class="modal-cabecera px-5 pt-5 pb-3 flex items-start justify-between gap-3">
             <div class="min-w-0">
                 <button type="button" class="ficha-volver hidden"></button>
@@ -3012,7 +3063,7 @@
 
 <!-- Ficha de un establecimiento: corregir sus datos y unir otros a él. -->
 <div id="estOverlay" class="hidden modal-velo z-[1250]" role="dialog" aria-modal="true" aria-labelledby="estTitulo">
-    <div class="tarjeta modal-panel sm:max-w-lg">
+    <div class="tarjeta modal-panel ficha-fija sm:max-w-xl">
         <div class="modal-cabecera px-5 pt-5 pb-3 flex items-start justify-between gap-3">
             <div class="min-w-0">
                 <button type="button" class="ficha-volver hidden"></button>
@@ -3024,9 +3075,15 @@
         </div>
         <div class="modal-cuerpo px-5 pb-5 space-y-3">
             <!-- Solo cuando Google ha encontrado varios: elegir es lo primero. -->
+            <!-- Sin verificar: qué sitio es. Las opciones de Google y un buscador
+                 para pedirle otras, todas iguales (Es este / Ver en Maps). -->
             <div id="eAvisoGoogle" class="aviso-ficha hidden">
-                <div id="eGoogleEstado" class="font-medium mb-2"></div>
+                <div id="eGoogleEstado" class="font-medium"></div>
                 <div id="eCandidatos" class="lista-candidatos"></div>
+                <form id="eGoogleForm" class="busca-google">
+                    <input id="eGoogleTexto" type="text" class="campo" autocomplete="off" placeholder="Buscar otro sitio en Google">
+                    <button id="eGoogleBuscar" type="submit" class="boton">Buscar</button>
+                </form>
                 <button id="eNingunoGoogle" type="button" class="enlace-discreto mt-2">No es ninguno de estos</button>
             </div>
 

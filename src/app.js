@@ -116,6 +116,10 @@ app.get('/api/mapa/config', (req, res) => {
 app.get('/api/ia/config', (req, res) => {
     res.json(ia.configuracionPublica());
 });
+// Uso de hoy de cada modelo de Gemini (contado aquí: la API no lo da).
+app.get('/api/ia/uso', (req, res) => {
+    res.json(require('./services/ia_uso').resumen(ia.MODELOS));
+});
 
 // Avisos en tiempo real entre pestañas y dispositivos (escaneos y cambios).
 app.get('/api/eventos', eventos.suscribir);

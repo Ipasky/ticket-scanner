@@ -4,6 +4,8 @@ const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// Cada petición se cuenta (uso de hoy, cuotas y saturación por modelo): ia_uso.js.
+require('./ia_uso').vigilar(ai);
 
 // --- REGLA ANTI-RAZONAMIENTO -------------------------------------------------
 // El responseSchema valida la ESTRUCTURA (que el campo sea un string), no el
@@ -1245,7 +1247,7 @@ const CATEGORIAS_BANCO = ['ALIMENTACION', 'RESTAURACION', 'TRANSPORTE', 'OCIO', 
 async function clasificarComercios(lista) {
     if (!lista.length) return [];
     const texto = `Clasifica cada comercio de un extracto bancario español. Los nombres vienen
-recortados y en mayúsculas como los escribe el banco ("CARREF MANRESA", "INDIGO S. JOAN").
+recortados y en mayúsculas como los escribe el banco ("CARREF TERRASSA", "INDIGO PL. CATALUNYA").
 Categorías posibles: ${CATEGORIAS_BANCO.join(', ')}.
 - SUSCRIPCIONES: servicios digitales y cuotas que se pagan cada mes o cada año (streaming,
   música, nube, software, IA, gimnasio, telefonía, prensa).
@@ -1270,7 +1272,9 @@ ${lista.map((c, i) => `${i}. ${c.comercio}${c.poblacion ? ` (${c.poblacion})` : 
         }
     };
     let ultimo = null;
-    for (const modelo of MODELOS) {
+    // Del último modelo (el rápido, con más cuota diaria) al primero: la cuota de
+    // los buenos se reserva para leer tiquets.
+    for (const modelo of [...MODELOS].reverse()) {
         try {
             const r = await ai.models.generateContent({
                 model: modelo,
@@ -1327,7 +1331,9 @@ ${lista.map((c, i) => `${i}. ${c.comercio}${c.poblacion ? ` (${c.poblacion})` : 
         }
     };
     let ultimo = null;
-    for (const modelo of MODELOS) {
+    // Del último modelo (el rápido, con más cuota diaria) al primero: la cuota de
+    // los buenos se reserva para leer tiquets.
+    for (const modelo of [...MODELOS].reverse()) {
         try {
             const r = await ai.models.generateContent({
                 model: modelo,

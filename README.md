@@ -27,19 +27,34 @@ It is built for **one person** and runs on your own computer or home server. You
 
 ## Contents
 
-- [Features](#features)
-- [Screenshots](#screenshots)
-- [What leaves your machine](#what-leaves-your-machine)
-- [Quick start](#quick-start)
-- [Connecting Gemini](#connecting-gemini-required)
-- [Map and places](#map-and-places-optional)
-- [Connecting your bank](#connecting-your-bank-optional)
-- [Running it on a server](#running-it-on-a-server)
-- [How to use it](#how-to-use-it)
-- [Backups](#backups)
-- [Project structure](#project-structure)
-- [Development](#development)
-- [License](#license)
+- [ticket-scanner](#ticket-scanner)
+  - [Contents](#contents)
+  - [Features](#features)
+    - [🧾 Receipts](#-receipts)
+    - [📊 Dashboard](#-dashboard)
+    - [📍 Places and map](#-places-and-map)
+    - [🏦 Bank (optional)](#-bank-optional)
+    - [✨ More](#-more)
+  - [Screenshots](#screenshots)
+    - [Themes](#themes)
+  - [What leaves your machine](#what-leaves-your-machine)
+  - [Quick start](#quick-start)
+  - [Connecting Gemini *(required)*](#connecting-gemini-required)
+  - [Map and places *(optional)*](#map-and-places-optional)
+    - [Locating places (free, OpenStreetMap)](#locating-places-free-openstreetmap)
+    - [Verification and map (Google Maps Platform)](#verification-and-map-google-maps-platform)
+  - [Connecting your bank *(optional)*](#connecting-your-bank-optional)
+    - [1. Register your application with Enable Banking](#1-register-your-application-with-enable-banking)
+    - [2. Configure ticket-scanner](#2-configure-ticket-scanner)
+    - [3. Connect from the app](#3-connect-from-the-app)
+    - [Good to know](#good-to-know)
+    - [Importing older statements](#importing-older-statements)
+  - [Running it on a server](#running-it-on-a-server)
+  - [How to use it](#how-to-use-it)
+  - [Backups](#backups)
+  - [Project structure](#project-structure)
+  - [Development](#development)
+  - [License](#license)
 
 ---
 
@@ -52,6 +67,7 @@ It is built for **one person** and runs on your own computer or home server. You
 - **Review screen** to check and fix everything: shop and category first, then the linked bank payment, total and date, split bills, address and line items.
 - **Re-analyse** with a different model if you are not happy with the result.
 - **Foreign currencies** are converted to euros at that day's exchange rate.
+- **Cash receipts**: the total is the purchase total, never the cash handed over or the change.
 
 ### 📊 Dashboard
 - This month's spending compared with your usual spending, plus an end-of-month forecast.
@@ -62,7 +78,7 @@ It is built for **one person** and runs on your own computer or home server. You
 
 ### 📍 Places and map
 - Every shop is a **place** with its own page: where it is, which receipts and payments belong to it, and what it is.
-- **Google Maps verification**: places are looked up on Google and get their real name, address and location. When there are several candidates, you pick the right one.
+- **Google Maps verification**: places are looked up on Google and get their real name, address and location. When there are several candidates, you pick the right one, and you can search Google for other places right there; every option has a button to check it on Google Maps first.
 - A **map** of where you spend, clustered by area.
 - Merge duplicate places, mark a place as an online shop (no location), or flag it as a subscription.
 
@@ -71,11 +87,12 @@ It is built for **one person** and runs on your own computer or home server. You
 - **Automatic sync** every 6 hours, plus a manual sync button.
 - **Understands statement descriptions**: card payments, Bizum sent and received, transfers, direct debits, refunds…
 - **Matches each payment with its receipt** (same amount, same days, same place). A payment with a receipt is never counted twice.
-- **Unifies merchant names**: `MCDONALDS MANRESA` and `MCDONALD'S` end up as the same place (Gemini + Google Maps).
+- **Unifies merchant names**: `MCDONALDS TERRASSA` and `MCDONALD'S` end up as the same place (Gemini + Google Maps).
 - **Categorises automatically** and learns from your corrections.
 - **Subscriptions**: detects recurring charges (monthly, yearly…), lets you confirm or add them, and shows upcoming charges on the calendar.
 - **Imports older statements** in Excel or PDF to go further back than the bank connection allows, and **converts a PDF statement to Excel**.
 - **Split bills**: mark a payment as shared and record your part; restaurant bills above a set amount ask you automatically.
+- **Per-payment places**: changing the place of one payment changes only that payment; changing it for every payment of the same merchant is a separate, confirmed step.
 
 ### ✨ More
 - **Installable app** on phone and desktop (PWA).
@@ -195,7 +212,9 @@ Gemini is the Google model that reads the photos.
    GEMINI_MODELOS=gemini-2.5-pro,gemini-flash-latest
    ```
 
-   If the first one is overloaded or out of quota, the app moves on to the next one. When uploading you can force **Mejor** (best: the first model) or **Rápido** (fast: the last one).
+   If the first one is overloaded or out of quota, the app moves on to the next one. When uploading you can force **Mejor** (best: the first model) or **Rápido** (fast: the last one). Background bank tasks (categorising and identifying merchants) start from the **last** model, so the daily quota of the better ones is kept for receipts.
+
+   The **Banco** window has a **Gemini hoy** (Gemini today) panel with each model's requests today, its daily limit and whether it is exhausted or overloaded right now. Google does not expose usage through the API, so the app counts the requests itself and learns each limit from the quota errors.
 
 To see which models your key can use:
 
@@ -362,6 +381,7 @@ ticket-scanner/
 │   │
 │   ├── services/
 │   │   ├── ai_service.js          Gemini: prompt, schema and model cascade
+│   │   ├── ia_uso.js              Gemini usage per model: requests, limits, quota errors
 │   │   ├── normalizacion.js       Checks and cleans everything the AI returns
 │   │   ├── establecimientos.js    Place identity: matching and merging
 │   │   ├── lugares.js             Google Places verification
@@ -378,11 +398,14 @@ ticket-scanner/
 │   └── public/                Front end: no framework, no build step
 │       ├── index.html             The whole interface (HTML + CSS)
 │       ├── app.js                 Interface logic
+│       ├── i18n.js                ES / EN translation layer (dictionary + rules)
 │       ├── login.html             Login page (local mode)
 │       ├── sin-identidad.html     Shown when the portal sends no identity
 │       ├── manifest.webmanifest   PWA manifest
 │       ├── sw.js · pwa.js         Service worker (never caches your data)
 │       └── iconos/                App icons
+│
+├── docs/screenshots/          Images used in this README
 │
 ├── scripts/
 │   ├── hash_password.js       npm run hash-password

@@ -64,8 +64,8 @@ test('un cargo casa con su tiquet por importe, fecha y nombre; el dudoso no', ()
     const ins = db.prepare(`INSERT INTO movimientos (cuenta_uid, clave, fecha, importe_centimos, concepto, clase, comercio)
                             VALUES ('c1', ?, ?, ?, ?, 'tarjeta', ?)`);
     for (const [clave, fecha, imp, concepto] of [
-        ['a', '2026-10-03', -1230, 'PAGO MOVIL EN CARREF MANRESA, MANRESA ES, TARJ. :*1'],
-        ['b', '2026-10-03', -500, 'PAGO MOVIL EN BAR X, MANRESA ES, TARJ. :*1']]) {
+        ['a', '2026-10-03', -1230, 'PAGO MOVIL EN CARREF TERRASSA, TERRASSA ES, TARJ. :*1'],
+        ['b', '2026-10-03', -500, 'PAGO MOVIL EN BAR X, TERRASSA ES, TARJ. :*1']]) {
         ins.run(clave, fecha, imp, concepto, parsearConcepto(concepto).comercio);
     }
     const tiquets = () => [
@@ -84,8 +84,8 @@ test('categorías: regla por tipo, y la puesta a mano se aprende para el comerci
     db.prepare(`INSERT INTO cuentas (uid, sesion_id, iban, leer) VALUES ('c1', 's1', 'ES00', 1)`).run();
     const ins = db.prepare(`INSERT INTO movimientos (cuenta_uid, clave, fecha, importe_centimos, concepto) VALUES ('c1', ?, ?, ?, ?)`);
     ins.run('1', '2026-10-01', -300, 'BIZUM A ANA CONCEPTO Cena');
-    ins.run('2', '2026-10-02', -1500, 'PAGO MOVIL EN GIMNAS FIT, MANRESA ES, TARJ. :*1');
-    ins.run('3', '2026-11-02', -1500, 'PAGO MOVIL EN GIMNAS FIT, MANRESA ES, TARJ. :*1');
+    ins.run('2', '2026-10-02', -1500, 'PAGO MOVIL EN GIMNAS FIT, TERRASSA ES, TARJ. :*1');
+    ins.run('3', '2026-11-02', -1500, 'PAGO MOVIL EN GIMNAS FIT, TERRASSA ES, TARJ. :*1');
     const ticketsDb = { prepare: () => ({ all: () => [], get: () => null }) };
     const b = crear({ db, ticketsDb, config: { activa: true } });
     b.analizar();
@@ -93,7 +93,7 @@ test('categorías: regla por tipo, y la puesta a mano se aprende para el comerci
     const id = db.prepare("SELECT id FROM movimientos WHERE clave = '2'").get().id;
     b.ponerCategoria(id, 'suscripciones');
     assert.equal(db.prepare("SELECT categoria FROM movimientos WHERE clave = '3'").get().categoria, 'SUSCRIPCIONES');
-    ins.run('4', '2026-12-02', -1500, 'PAGO MOVIL EN GIMNAS FIT, MANRESA ES, TARJ. :*1');
+    ins.run('4', '2026-12-02', -1500, 'PAGO MOVIL EN GIMNAS FIT, TERRASSA ES, TARJ. :*1');
     b.analizar();
     assert.equal(db.prepare("SELECT categoria FROM movimientos WHERE clave = '4'").get().categoria, 'SUSCRIPCIONES');
 });
@@ -108,10 +108,10 @@ test('extracto importado: no duplica lo que ya trajo la API ni lo importado ante
     const { insertarSinDuplicar } = require('../src/services/banco.js');
     insertarSinDuplicar(db, norm({ transaction_id: 't1', transaction_amount: { amount: '1.50', currency: 'EUR' },
         credit_debit_indicator: 'DBIT', booking_date: '2026-10-02', transaction_date: '2026-10-01',
-        remittance_information: ['PAGO MOVIL EN BAR X, MANRESA ES, TARJ. :*123456'] }, 'c1'), 'api');
+        remittance_information: ['PAGO MOVIL EN BAR X, TERRASSA ES, TARJ. :*123456'] }, 'c1'), 'api');
     const filas = [
-        { fecha: '2026-10-01', concepto: 'Pago Movil En Bar X, Manresa Es, Tarj. :*56', importe: -1.5, saldo: 100 },
-        { fecha: '2026-10-01', concepto: 'Pago Movil En Bar X, Manresa Es, Tarj. :*56', importe: -1.5, saldo: 98.5 },
+        { fecha: '2026-10-01', concepto: 'Pago Movil En Bar X, Terrassa Es, Tarj. :*56', importe: -1.5, saldo: 100 },
+        { fecha: '2026-10-01', concepto: 'Pago Movil En Bar X, Terrassa Es, Tarj. :*56', importe: -1.5, saldo: 98.5 },
         { fecha: '2026-09-20', concepto: 'Bizum De Ana Concepto Cena', importe: 12, saldo: 101.5 }
     ];
     const r = b.importar({ iban: 'ES00 1234 5678 9012 3456 7890', filas });
@@ -121,7 +121,7 @@ test('extracto importado: no duplica lo que ya trajo la API ni lo importado ante
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM movimientos').get().n, 3);
     // Y si la API vuelve a traer el mismo café, tampoco se duplica.
     insertarSinDuplicar(db, norm({ transaction_id: 't1', transaction_amount: { amount: '1.50', currency: 'EUR' },
-        credit_debit_indicator: 'DBIT', booking_date: '2026-10-02', remittance_information: ['PAGO MOVIL EN BAR X, MANRESA ES, TARJ. :*123456'] }, 'c1'), 'api');
+        credit_debit_indicator: 'DBIT', booking_date: '2026-10-02', remittance_information: ['PAGO MOVIL EN BAR X, TERRASSA ES, TARJ. :*123456'] }, 'c1'), 'api');
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM movimientos').get().n, 3);
 });
 
@@ -130,8 +130,8 @@ test('cambiar el establecimiento de un pago solo cambia ese pago; con todos, el 
     const db = abrir(path.join(TMP, 'est.db'));
     db.prepare(`INSERT INTO cuentas (uid, sesion_id, iban, leer) VALUES ('c1', 's1', 'ES00', 1)`).run();
     const ins = db.prepare(`INSERT INTO movimientos (cuenta_uid, clave, fecha, importe_centimos, concepto) VALUES ('c1', ?, ?, ?, ?)`);
-    ins.run('1', '2026-10-01', -280, 'PAGO MOVIL EN INDIGO S. JOAN, MANRESA ES, TARJ. :*1');
-    ins.run('2', '2026-10-02', -300, 'PAGO MOVIL EN INDIGO S. JOAN, MANRESA ES, TARJ. :*1');
+    ins.run('1', '2026-10-01', -280, 'PAGO MOVIL EN INDIGO PL. CATALUNYA, TERRASSA ES, TARJ. :*1');
+    ins.run('2', '2026-10-02', -300, 'PAGO MOVIL EN INDIGO PL. CATALUNYA, TERRASSA ES, TARJ. :*1');
     const ests = [{ id: 1, nombre: 'INDIGO' }, { id: 2, nombre: 'BM' }];
     const ticketsDb = { prepare: (sql) => ({ all: () => (/FROM establecimientos/.test(sql) ? ests : []), get: () => null }) };
     const b = crear({ db, ticketsDb, config: { activa: true } });
@@ -156,7 +156,7 @@ test('el mismo apunte, primero sin referencia y luego con ella, no se duplica (y
     db.prepare(`INSERT INTO cuentas (uid, sesion_id, iban, leer) VALUES ('c1', 's1', 'ES00', 1)`).run();
     const apunte = { transaction_amount: { amount: '6.50', currency: 'EUR' }, credit_debit_indicator: 'DBIT',
         booking_date: '2026-10-23', value_date: '2026-10-23', status: 'BOOK',
-        remittance_information: ['PAGO MOVIL EN MERCADONA, MANRESA ES, TARJ. :*1'] };
+        remittance_information: ['PAGO MOVIL EN MERCADONA, TERRASSA ES, TARJ. :*1'] };
     assert.equal(insertarSinDuplicar(db, norm(apunte, 'c1'), 'api'), 'nuevo');
     db.prepare('UPDATE movimientos SET tiquet_id = 90').run();
     assert.equal(insertarSinDuplicar(db, norm({ ...apunte, entry_reference: 'REF1' }, 'c1'), 'api'), 'repetido');

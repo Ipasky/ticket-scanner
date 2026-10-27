@@ -35,7 +35,7 @@ const pedirCrudo = (metodo, ruta, { headers = {}, cuerpo } = {}) => {
     return fetch(ctx.base + ruta, opciones);
 };
 
-const conIdentidad = () => ({ [CABECERA]: 'isaac' });
+const conIdentidad = () => ({ [CABECERA]: 'ana' });
 
 // =============================================================================
 // LA CABECERA NO VALE SI VIENE DE DONDE NO DEBE
@@ -102,16 +102,16 @@ test('/ping sigue público desde cualquier origen', async () => {
 
 test('identidadDe() respeta el origen: sin red admitida no hay nadie', () => {
     const peticionFalsa = (ip) => ({
-        headers: { [CABECERA]: 'isaac' },
+        headers: { [CABECERA]: 'ana' },
         socket: { remoteAddress: ip },
         originalUrl: '/api/tickets'
     });
 
     assert.equal(auth.identidadDe(peticionFalsa('127.0.0.1')), null);
     assert.equal(auth.identidadDe(peticionFalsa('10.43.0.1')), null);
-    assert.equal(auth.identidadDe(peticionFalsa('10.42.0.7')).usuario, 'isaac');
+    assert.equal(auth.identidadDe(peticionFalsa('10.42.0.7')).usuario, 'ana');
     // Así llega una conexión IPv4 a un socket IPv6: tiene que valer igual.
-    assert.equal(auth.identidadDe(peticionFalsa('::ffff:10.42.0.7')).usuario, 'isaac');
+    assert.equal(auth.identidadDe(peticionFalsa('::ffff:10.42.0.7')).usuario, 'ana');
 });
 
 test('comprobarOrigen explica el motivo y dice qué IP ha visto', () => {

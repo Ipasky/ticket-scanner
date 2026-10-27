@@ -1624,11 +1624,32 @@ function volverDeFicha() {
     return true;
 }
 function pintarVolver(overlayId) {
+    // El contenido nuevo entra con un fundido corto: al pasar de una ficha a
+    // otra o al repintarla (elegir un sitio) no hay un cambio de golpe.
+    suavizarFicha(overlayId);
     const b = $(overlayId).querySelector('.ficha-volver');
     if (!b) return;
     const arriba = PILA_FICHAS[PILA_FICHAS.length - 1];
     b.classList.toggle('hidden', !arriba);
     b.innerHTML = arriba ? `← <span>${esc(arriba.etiqueta)}</span>` : '';
+}
+// Pulsar fuera de una ventana la cierra, pero solo si la pulsación EMPIEZA
+// fuera. Al seleccionar texto dentro y soltar fuera, el navegador manda el clic
+// al velo (el antepasado común) y la ventana se cerraba sola.
+let inicioPulsacion = null;
+document.addEventListener('pointerdown', (ev) => { inicioPulsacion = ev.target; }, true);
+document.addEventListener('click', (ev) => {
+    const t = ev.target;
+    if (t && t.classList && t.classList.contains('modal-velo') && inicioPulsacion !== t) ev.stopPropagation();
+}, true);
+
+function suavizarFicha(overlayId) {
+    const panel = $(overlayId).querySelector('.modal-panel');
+    if (!panel || !panel.animate || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    for (const parte of panel.querySelectorAll(':scope > .modal-cabecera, :scope > .modal-cuerpo')) {
+        parte.animate([{ opacity: 0.25, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }],
+            { duration: 180, easing: 'ease-out' });
+    }
 }
 document.addEventListener('click', (ev) => {
     const b = ev.target.closest('.ficha-volver');
@@ -1704,6 +1725,7 @@ function crearBuscadorEst({
                 partes.push(`<div class="bq-fila" data-i="${filas.length - 1}">
                     <span class="bq-nombre">${esc(c.nombre)}${c.cerrado ? ' · cerrado' : ''}</span>
                     <span class="bq-donde">${esc(c.direccion_completa || '')}${ya ? ` · ya es ${esc(ya.nombre)}` : c.tipo ? ` · ${esc(c.tipo)}` : ''}</span>
+                    ${botonMaps(c.url || `https://www.google.com/maps/place/?q=place_id:${encodeURIComponent(c.place_id)}`, 'Maps')}
                     <span class="bq-accion">${esc(ya ? accionTuyo : accionGoogle)}</span></div>`);
             }
         }
@@ -1766,6 +1788,7 @@ function crearBuscadorEst({
     });
     panel.addEventListener('mousedown', (ev) => {
         ev.preventDefault();        // que el campo no pierda el foco
+        if (ev.target.closest('[data-bq-maps]')) return;     // el enlace a Maps se abre solo, sin elegir
         if (ev.target.closest('[data-bq-google]')) { buscar(); return; }
         const fila = ev.target.closest('.bq-fila');
         if (fila) elegir(Number(fila.dataset.i));
@@ -4365,7 +4388,10 @@ function pintarRecuadro() {
     const caja = rectoImagenContenida(img);
     if (!caja) { marco.classList.add('hidden'); return; }
 
-    const { x, y, ancho, alto } = recuadroActual;
+    // Un poco de margen alrededor: el recuadro de la IA suele quedarse justo.
+    const m = 0.012;
+    const x = Math.max(0, recuadroActual.x - m), y = Math.max(0, recuadroActual.y - m);
+    const ancho = Math.min(1 - x, recuadroActual.ancho + 2 * m), alto = Math.min(1 - y, recuadroActual.alto + 2 * m);
     marco.style.left   = `${caja.left + x * caja.width}px`;
     marco.style.top    = `${caja.top  + y * caja.height}px`;
     marco.style.width  = `${ancho * caja.width}px`;
@@ -4431,7 +4457,7 @@ function textoPrecision(precision) {
  * Reparte una dirección copiada de Google Maps en calle, ciudad, C.P. y país.
  *
  *   "203-206 Piccadilly, London W1J 9HD, Reino Unido"
- *   "Passeig de Pere III, 30, 08241 Manresa, Barcelona, España"
+ *   "Rambla d'Ègara, 30, 08221 Terrassa, Barcelona, España"
  *
  * El país es la última parte si no lleva números. La ciudad es la parte que
  * contiene el código postal (buscando desde el final); lo que va detrás de ella
@@ -4442,7 +4468,7 @@ const PATRONES_CP = [
     /\b([A-Z]\d[A-Z]\s?\d[A-Z]\d)\b/i,             // Canadá: K1A 0B1
     /\b(\d{4}\s?[A-Z]{2})\b/,                       // Países Bajos: 1012 AB
     /\b(\d{3}-\d{4}|\d{5}-\d{3}|\d{2}-\d{3})\b/,  // Japón, Brasil, Polonia
-    /\b(\d{4,6})\b/                                  // el resto: 08241, 75001, 1010
+    /\b(\d{4,6})\b/                                  // el resto: 08221, 75001, 1010
 ];
 function buscarCp(texto) {
     for (const re of PATRONES_CP) {
@@ -4452,7 +4478,7 @@ function buscarCp(texto) {
     return null;
 }
 // Solo se toma la última parte como país si ES un país: Google Maps a menudo
-// acaba en la provincia ("…, 08240 Manresa, Barcelona") y no en el país.
+// acaba en la provincia ("…, 08221 Terrassa, Barcelona") y no en el país.
 const PAISES = new Set([
     'españa', 'spain', 'espanya', 'andorra', 'portugal', 'francia', 'france', 'italia', 'italy',
     'alemania', 'germany', 'deutschland', 'reino unido', 'united kingdom', 'uk', 'irlanda', 'ireland',
@@ -5011,10 +5037,8 @@ function abrirEstablecimiento(id) {
     ponerTipoFicha($('estTipo'), 'est');
     $('estTitulo').textContent = e.nombre;
     $('estResumen').innerHTML = cuentaEst(e);
-    const u = textoUbicacionEst(e);
-    const enlace = e.place_id ? ` · <a href="https://www.google.com/maps/place/?q=place_id:${encodeURIComponent(e.place_id)}" target="_blank" rel="noopener">ver en Maps</a>` : '';
-    $('eUbicacion').innerHTML = `<div class="font-medium">📍 ${esc(u.linea)}</div>
-        <div class="text-xs mt-1" style="color: var(--texto-2)">${e.google_estado === 'verificado' ? '<span style="color: var(--g)">✓</span> ' : ''}${esc(u.estado)}${enlace}</div>`;
+    $('eUbicacion').innerHTML = identidadEst(e);
+    $('eUbicacion').classList.toggle('verificada', e.google_estado === 'verificado');
     pintarGoogle(e);
     buscadorEst.olvidarGoogle();
     if (e.google_estado !== 'verificado' && (e.google_candidatos || []).length) buscadorEst.ponerGoogle(e.google_candidatos);
@@ -5040,6 +5064,31 @@ function abrirEstablecimiento(id) {
     document.body.classList.add('overflow-hidden');
     pintarVolver('estOverlay');
 }
+/** Enlace a Google Maps: el sitio exacto si se conoce, si no el punto o una búsqueda por nombre. */
+function urlMapsEst(e) {
+    if (e.place_id) return `https://www.google.com/maps/place/?q=place_id:${encodeURIComponent(e.place_id)}`;
+    if (Number.isFinite(e.latitud)) return `https://www.google.com/maps/search/?api=1&query=${e.latitud},${e.longitud}`;
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([e.nombre, e.ciudad].filter(Boolean).join(' '))}`;
+}
+const ICONO_SALIR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg>';
+const botonMaps = (url, texto = 'Abrir en Google Maps') =>
+    `<a class="boton-maps" href="${esc(url)}" target="_blank" rel="noopener" data-bq-maps>${esc(texto)} ${ICONO_SALIR}</a>`;
+/** Qué sitio es: el nombre y la dirección que da Google (si está verificado), el estado y Maps. */
+function identidadEst(e) {
+    const u = textoUbicacionEst(e);
+    const verificado = e.google_estado === 'verificado';
+    const nombreG = verificado && e.google_nombre && sinAcentos(e.google_nombre) !== sinAcentos(e.nombre) ? e.google_nombre : '';
+    const dir = (verificado && e.google_direccion) || u.linea || 'Sin dirección';
+    const estado = verificado ? 'Verificado en Google' : u.estado;
+    return `
+        ${nombreG ? `<div class="est-id-nombre">${esc(nombreG)}</div>` : ''}
+        <div class="est-id-dir">${esc(dir)}</div>
+        <div class="est-id-pie">
+            <span class="est-id-estado"><i class="punto-verif en-linea${verificado ? ' si' : ''}"></i>${esc(estado)}</span>
+            ${e.geo_precision === 'online' ? '' : botonMaps(urlMapsEst(e), e.place_id ? 'Abrir en Google Maps' : 'Buscar en Google Maps')}
+        </div>`;
+}
+
 let actividadMovEst = null;
 const etiquetaEst = () => `Establecimiento · ${estAbierto ? estAbierto.nombre : ''}`;
 
@@ -5120,19 +5169,35 @@ $('eCancelar').addEventListener('click', cerrarEstablecimiento);
 $('estOverlay').addEventListener('click', (ev) => { if (ev.target === $('estOverlay')) cerrarEstablecimiento(); });
 
 /** Google: el aviso de arriba solo cuando hay sitios entre los que elegir. */
-function pintarGoogle(e) {
+/**
+ * Sin verificar (y con sitio físico): un solo bloque para decir qué sitio es.
+ * Las opciones que encontró Google y un buscador para pedirle otras, que salen
+ * igual. Verificado u online: la ficha de identidad, sin este bloque.
+ */
+function pintarGoogle(e, resultados = null, buscado = '') {
+    const pendiente = e.google_estado !== 'verificado' && e.geo_precision !== 'online';
+    $('eAvisoGoogle').classList.toggle('hidden', !pendiente);
+    $('eUbicacion').classList.toggle('hidden', pendiente);
+    if (!pendiente) return;
+    const candidatos = resultados || e.google_candidatos || [];
+    $('eGoogleEstado').textContent = resultados
+        ? (candidatos.length ? `Google para «${buscado}»: ¿cuál es?` : `Google no ha encontrado nada para «${buscado}».`)
+        : candidatos.length === 1 ? 'Google ha encontrado un sitio: ¿es este?'
+        : candidatos.length ? `Google ha encontrado ${candidatos.length} sitios: ¿cuál es?`
+        : 'Sin verificar en Google: búscalo para situarlo en el mapa.';
+    if (!resultados) $('eGoogleTexto').value = [e.nombre, e.ciudad || e.lugar_inferido].filter(Boolean).join(' ');
+    $('eNingunoGoogle').classList.toggle('hidden', !!resultados || !(e.google_candidatos || []).length);
+    pintarCandidatosEst(candidatos);
+}
+function pintarCandidatosEst(candidatos) {
     const enlace = (id) => `https://www.google.com/maps/place/?q=place_id:${encodeURIComponent(id)}`;
-    const candidatos = e.google_estado === 'verificado' ? [] : (e.google_candidatos || []);
-    $('eAvisoGoogle').classList.toggle('hidden', !candidatos.length);
-    $('eGoogleEstado').textContent = candidatos.length === 1 ? 'Google ha encontrado un sitio: ¿es este?'
-        : `Google ha encontrado ${candidatos.length} sitios: ¿cuál es?`;
     $('eCandidatos').innerHTML = candidatos.map(c => `
         <div class="candidato">
             <span class="c-nombre">${esc(c.nombre)}${c.cerrado ? ' · cerrado' : ''}</span>
             <span class="c-donde">${esc(c.direccion_completa)}${c.tipo ? ` · ${esc(c.tipo)}` : ''}</span>
             <span class="c-acciones">
                 <button type="button" class="boton" data-place="${esc(c.place_id)}">Es este</button>
-                <a href="${esc(c.url || enlace(c.place_id))}" target="_blank" rel="noopener">ver en Maps</a>
+                ${botonMaps(c.url || enlace(c.place_id), 'Ver en Maps')}
             </span>
         </div>`).join('');
 }
@@ -5161,6 +5226,18 @@ async function elegirLugarEst(placeId) {
     await refrescarTrasEstablecimiento();
     abrirEstablecimiento(datos.establecimiento.id);
 }
+// Buscar otros sitios en Google: salen en la misma lista, con los mismos botones.
+$('eGoogleForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const texto = $('eGoogleTexto').value.trim();
+    if (!texto || !estAbierto) return;
+    $('eGoogleBuscar').disabled = true;
+    $('eGoogleBuscar').textContent = 'Buscando…';
+    const datos = await accionGoogle('buscar-lugar', { texto });
+    $('eGoogleBuscar').disabled = false;
+    $('eGoogleBuscar').textContent = 'Buscar';
+    if (datos) pintarGoogle(estAbierto, datos.candidatos || [], texto);
+});
 $('eCandidatos').addEventListener('click', async (ev) => {
     const b = ev.target.closest('[data-place]');
     if (!b) return;
@@ -6136,6 +6213,7 @@ async function pintarBanco() {
     $('bancoConectar').classList.toggle('boton-acento', !e.conectado || e.caducada || (dias !== null && dias <= 14));
     $('bancoSincronizar').classList.toggle('hidden', !e.conectado || e.caducada);
     pintarSyncBanco(e);
+    pintarUsoIA();
     $('bancoImportar').classList.toggle('hidden', !e.cuentas.some(c => c.leer));
 
     const vigentes = e.cuentas.filter(c => c.vigente);
@@ -6200,6 +6278,34 @@ function pintarSyncBanco(e) {
     caja.innerHTML = filas.join('');
     caja.classList.remove('hidden');
     $('bancoSincronizar').disabled = Boolean(s.pausa_manual_hasta) || e.sincronizando;
+}
+
+/** Gemini hoy: peticiones por modelo, límites conocidos y si está agotado o saturado. */
+async function pintarUsoIA() {
+    let d;
+    try { d = await (await api('/api/ia/uso')).json(); } catch (_) { return; }
+    if (!d || !Array.isArray(d.modelos) || !d.modelos.length) { $('plIA').classList.add('hidden'); return; }
+    $('plIA').classList.remove('hidden');
+    const corto = (m) => m.replace(/^gemini-/, '');
+    const filas = d.modelos.map(m => {
+        const limite = m.limite_dia ? ` de ${m.limite_dia}/día` : '';
+        const extra = [m.cuota ? `${m.cuota} sin cuota` : '', m.saturado ? `${m.saturado} saturado` : ''].filter(Boolean).join(' · ');
+        const [clase, texto] = m.estado === 'agotado_dia' ? ['agotado', `agotado hasta ${cuandoTexto(m.agotado_hasta).replace(/^hoy a las |^mañana a las /, '')}`]
+            : m.estado === 'agotado_minuto' ? ['agotado', 'límite por minuto: espera un poco']
+            : m.estado === 'saturado' ? ['saturado', `saturado ${haceTexto(m.ultimo_saturado_at)}`]
+            : m.estado === 'ok' ? ['ok', 'disponible'] : ['sin_uso', 'sin usar hoy'];
+        return `<div class="ia-fila">
+            <span class="ia-modelo">${esc(corto(m.modelo))}</span>
+            <span class="ia-cifras">${esc(plural(m.peticiones, 'petición', 'peticiones'))} hoy${esc(limite)}${extra ? ` · ${esc(extra)}` : ''}</span>
+            <span class="ia-estado ${clase}">${esc(texto)}</span></div>`;
+    });
+    const agotados = d.modelos.filter(m => m.estado.startsWith('agotado')).length;
+    const total = d.modelos.reduce((s, m) => s + m.peticiones, 0);
+    $('iaUso').innerHTML = filas.join('') +
+        `<p class="ia-nota">Contado por la app (Google no da el uso por la API). Los límites salen cuando un modelo se agota. La cuota diaria se renueva ${esc(cuandoTexto(d.renueva_at))}.</p>`;
+    valorPlegable('plIA', agotados
+        ? `<span class="aviso">${agotados} de ${d.modelos.length} agotado${agotados === 1 ? '' : 's'}</span>`
+        : esc(`${total} peticiones`));
 }
 
 let bancoVista = 'mov';

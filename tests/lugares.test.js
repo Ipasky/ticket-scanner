@@ -51,24 +51,24 @@ const crearTicket = (est, fecha, total) => db.prepare(
 const est = (id) => db.prepare('SELECT * FROM establecimientos WHERE id = ?').get(id);
 
 test('el nombre casa con la razón social y con variantes', () => {
-    assert.ok(nombreCoincide('ABACUS SCCL', 'Abacus Manresa'));
+    assert.ok(nombreCoincide('ABACUS SCCL', 'Abacus Terrassa'));
     assert.ok(nombreCoincide('MERCADONA', 'Mercadona'));
     assert.ok(!nombreCoincide('MERCADONA', 'Lidl'));
 });
 
 test('un candidato claro se verifica: nombre, dirección y punto de Google', async () => {
-    const id = crearEst('ABACUS SCCL', { ciudad: 'Manresa' });
-    const { lugares } = servicio([[sitio('p-abacus', 'Abacus Manresa', 'Carrer de Guimerà, 33', '08241', 'Manresa')]]);
+    const id = crearEst('ABACUS SCCL', { ciudad: 'Terrassa' });
+    const { lugares } = servicio([[sitio('p-abacus', 'Abacus Terrassa', 'Carrer Major, 33', '08221', 'Terrassa')]]);
     const r = await lugares.procesarUno(id);
     assert.equal(r.resultado, 'verificado');
     const e = est(id);
     assert.equal(e.place_id, 'p-abacus');
-    assert.equal(e.nombre, 'ABACUS MANRESA');
-    assert.equal(e.direccion, 'Carrer de Guimerà, 33');
-    assert.equal(e.codigo_postal, '08241');
+    assert.equal(e.nombre, 'ABACUS TERRASSA');
+    assert.equal(e.direccion, 'Carrer Major, 33');
+    assert.equal(e.codigo_postal, '08221');
     assert.equal(e.geo_precision, 'google');
     // El nombre del tiquet queda como alias: el siguiente va directo.
-    assert.equal(buscarExistente('ABACUS SCCL', { ciudad: 'Manresa' }).id, id);
+    assert.equal(buscarExistente('ABACUS SCCL', { ciudad: 'Terrassa' }).id, id);
 });
 
 test('varios plausibles sin forma de elegir: por confirmar, y elegir a mano verifica', async () => {
@@ -85,14 +85,14 @@ test('varios plausibles sin forma de elegir: por confirmar, y elegir a mano veri
 });
 
 test('mismo place_id que otro: se unen sin perder tiquets, y choque de clave sin borrar', async () => {
-    const a = crearEst('BAR PEPE', { ciudad: 'Manresa' });
-    const { lugares: l1 } = servicio([[sitio('p-pepe', 'Bar Pepe', 'Carrer Major, 5', '08241', 'Manresa')]]);
+    const a = crearEst('BAR PEPE', { ciudad: 'Terrassa' });
+    const { lugares: l1 } = servicio([[sitio('p-pepe', 'Bar Pepe', 'Carrer Major, 5', '08221', 'Terrassa')]]);
     await l1.procesarUno(a);
-    const b = crearEst('BAR PEPE SL', { ciudad: 'Manresa', direccion: 'Carrer Major 5' });
+    const b = crearEst('BAR PEPE SL', { ciudad: 'Terrassa', direccion: 'Carrer Major 5' });
     crearTicket(a, '2026-03-01 10:00:00', 500);
     crearTicket(b, '2026-03-01 10:00:00', 500);   // el mismo tiquet, duplicado
     crearTicket(b, '2026-03-02 10:00:00', 700);
-    const { lugares: l2 } = servicio([[sitio('p-pepe', 'Bar Pepe', 'Carrer Major, 5', '08241', 'Manresa')]]);
+    const { lugares: l2 } = servicio([[sitio('p-pepe', 'Bar Pepe', 'Carrer Major, 5', '08221', 'Terrassa')]]);
     const r = await l2.procesarUno(b);
     assert.equal(r.resultado, 'unido');
     assert.equal(est(b), undefined);
@@ -101,14 +101,14 @@ test('mismo place_id que otro: se unen sin perder tiquets, y choque de clave sin
 });
 
 test('coordenadas a mano: nunca se verifica solo', () => {
-    const d = decidir({ nombre: 'X', ciudad: 'Manresa', geo_precision: 'manual' },
-        [{ nombre: 'X', direccion_completa: 'Manresa', cerrado: false }]);
+    const d = decidir({ nombre: 'X', ciudad: 'Terrassa', geo_precision: 'manual' },
+        [{ nombre: 'X', direccion_completa: 'Terrassa', cerrado: false }]);
     assert.equal(d.accion, 'confirmar');
 });
 
 test('mismo nombre en otra ciudad es otro establecimiento', () => {
-    const m1 = crearEst('MERCADONA', { ciudad: 'Manresa' });
-    assert.equal(buscarExistente('MERCADONA', { ciudad: 'Manresa' }).id, m1);
+    const m1 = crearEst('MERCADONA', { ciudad: 'Terrassa' });
+    assert.equal(buscarExistente('MERCADONA', { ciudad: 'Terrassa' }).id, m1);
     assert.equal(buscarExistente('MERCADONA', { ciudad: 'Girona' }), null);
     assert.equal(buscarExistente('MERCADONA', {}).id, m1);
 });
