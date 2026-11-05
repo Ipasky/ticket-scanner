@@ -1,0 +1,17 @@
+# Solo entra en la imagen lo que el Dockerfile copia; esto es la red de seguridad.
+.git
+node_modules
+.env
+.env.*
+keys
+*.pem
+database
+uploads
+extractos
+docs
+tests
+referencia_estetica
+.claude
+*.md
+repomix*
+folder_struct.txt

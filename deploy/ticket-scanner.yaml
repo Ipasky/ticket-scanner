@@ -1,0 +1,135 @@
+# =============================================================================
+# ticket-scanner en el K3s del HPC casero
+#   https://tiquetscan.hpc-private.duckdns.org  (solo VPN/LAN, detrás de Authelia)
+#
+# Sin secretos: el .env y la clave del banco se crean a mano UNA vez en la Pi
+# (Secrets ticket-scanner-env y ticket-scanner-claves). __IMAGEN__ lo sustituye
+# desplegar-app por la imagen recién construida.
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ticket-scanner
+---
+# Datos persistentes en el SSD de la Pi (local-path): bases SQLite y fotos.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ticket-scanner-datos
+  namespace: ticket-scanner
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ticket-scanner
+  namespace: ticket-scanner
+spec:
+  replicas: 1                 # SQLite: un solo proceso escribiendo
+  strategy:
+    type: Recreate            # nunca dos pods a la vez sobre la misma base
+  selector:
+    matchLabels: { app: ticket-scanner }
+  template:
+    metadata:
+      labels: { app: ticket-scanner }
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: pi-master
+      securityContext:
+        runAsUser: 1000       # usuario "node" de la imagen
+        runAsGroup: 1000
+        fsGroup: 1000
+      initContainers:
+        # Crea las carpetas de datos la primera vez
+        - name: carpetas
+          image: __IMAGEN__
+          command: ["sh", "-c", "mkdir -p /data/database /data/uploads"]
+          volumeMounts:
+            - { name: datos, mountPath: /data }
+      containers:
+        - name: ticket-scanner
+          image: __IMAGEN__
+          imagePullPolicy: Never       # la imagen se construye en la propia Pi
+          ports:
+            - containerPort: 3000
+          env:
+            # Estas mandan sobre lo que diga el .env (dotenv no pisa variables ya puestas)
+            - { name: TICKETS_DB_PATH,           value: /data/database/tickets.db }
+            - { name: TICKETS_UPLOADS_DIR,       value: /data/uploads }
+            - { name: ENABLEBANKING_KEY_PATH,    value: /claves/enablebanking.pem }
+            - { name: AUTH_MODE,                 value: proxy }
+            - { name: AUTH_PROXY_IPS_PERMITIDAS, value: 10.42.0.0/16 }
+            - { name: AUTH_PORTAL_URL,           value: https://auth.hpc-private.duckdns.org }
+            - { name: AUTH_LOGOUT_URL,           value: https://auth.hpc-private.duckdns.org/logout }
+            - { name: PORT,                      value: "3000" }
+            - { name: TZ,                        value: Europe/Madrid }
+          volumeMounts:
+            - { name: datos,  mountPath: /data }
+            - { name: env,    mountPath: /app/.env, subPath: .env, readOnly: true }
+            - { name: claves, mountPath: /claves, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /ping, port: 3000 }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /ping, port: 3000 }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { memory: 768Mi }
+      volumes:
+        - name: datos
+          persistentVolumeClaim: { claimName: ticket-scanner-datos }
+        - name: env
+          secret: { secretName: ticket-scanner-env }
+        - name: claves
+          secret: { secretName: ticket-scanner-claves, optional: true }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ticket-scanner
+  namespace: ticket-scanner
+spec:
+  selector: { app: ticket-scanner }
+  ports:
+    - { name: http, port: 3000, targetPort: 3000 }
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: authelia
+  namespace: ticket-scanner
+spec:
+  forwardAuth:
+    address: http://authelia.auth.svc.cluster.local:9091/api/authz/forward-auth
+    trustForwardHeader: true
+    authResponseHeaders: [Remote-User, Remote-Groups, Remote-Email, Remote-Name]
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: ticket-scanner
+  namespace: ticket-scanner
+spec:
+  entryPoints: [websecure]
+  routes:
+    # Manifiesto, service worker e iconos de la PWA: sin portal (no contienen
+    # datos; el móvil los pide antes de iniciar sesión para poder instalarla).
+    - match: Host(`tiquetscan.hpc-private.duckdns.org`) && (Path(`/manifest.webmanifest`) || Path(`/sw.js`) || PathPrefix(`/iconos/`))
+      kind: Rule
+      services:
+        - { name: ticket-scanner, port: 3000 }
+    - match: Host(`tiquetscan.hpc-private.duckdns.org`)
+      kind: Rule
+      middlewares:
+        - name: authelia
+      services:
+        - { name: ticket-scanner, port: 3000 }
+  tls: {}
